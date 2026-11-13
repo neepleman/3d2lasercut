@@ -6,11 +6,20 @@ from dataclasses import dataclass
 
 @dataclass
 class SliceConfig:
+    # --- Modo ---
+    mode: str = "stack"             # "stack" = fatias empilhadas | "waffle" = grade encaixada
+
     # --- Material / fatiamento ---
     thickness: float = 3.0          # espessura real da chapa (mm) — meça com paquímetro!
     axis: str = "z"                 # eixo de empilhamento do modelo: x, y ou z
     scale: float = 1.0              # fator de escala aplicado ao modelo
     target_height: float | None = None  # altura final ao longo do eixo (mm); sobrepõe `scale`
+
+    # --- Grade encaixada (waffle) ---
+    grid_x: float = 25.0            # distância entre as fatias X (mm)
+    grid_y: float = 25.0            # distância entre as fatias Y (mm)
+    slot_clearance: float = 0.1     # folga na largura das fendas (mm)
+    min_slot_overlap: float = 0.0   # cruzamentos menores que isso são ignorados (mm)
 
     # --- Limpeza de geometria ---
     min_area: float = 4.0           # descarta ilhas menores que isso (mm²)
@@ -38,10 +47,20 @@ class SliceConfig:
     sheet_margin: float = 5.0
     part_spacing: float = 3.0
     allow_rotation: bool = True
+    nesting: str = "shape"          # "shape" = pelo contorno real | "shelf" = por retângulo
+    nest_resolution: float = 1.0    # resolução da grade do nesting por contorno (mm)
 
     def validate(self) -> None:
         if self.thickness <= 0:
             raise ValueError("A espessura deve ser positiva.")
+        if self.mode not in ("stack", "waffle"):
+            raise ValueError("O modo deve ser 'stack' ou 'waffle'.")
+        if self.nesting not in ("shape", "shelf"):
+            raise ValueError("O nesting deve ser 'shape' ou 'shelf'.")
+        if self.grid_x <= 0 or self.grid_y <= 0:
+            raise ValueError("O espaçamento da grade deve ser positivo.")
+        if self.nest_resolution <= 0:
+            raise ValueError("A resolução do nesting deve ser positiva.")
         if self.axis not in ("x", "y", "z"):
             raise ValueError("O eixo deve ser x, y ou z.")
         if self.scale <= 0:
@@ -58,3 +77,7 @@ class SliceConfig:
     @property
     def pin_hole_radius(self) -> float:
         return (self.pin_diameter + self.pin_clearance) / 2.0
+
+    @property
+    def slot_width(self) -> float:
+        return self.thickness + self.slot_clearance

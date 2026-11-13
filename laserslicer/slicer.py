@@ -78,26 +78,38 @@ def clean_shape(shape: BaseGeometry, cfg: SliceConfig) -> list[Polygon]:
     return sorted(islands, key=lambda p: -p.area)
 
 
+def section_shapes(mesh: trimesh.Trimesh, heights) -> list[BaseGeometry]:
+    """Seções horizontais (planos Z = h) como áreas preenchidas.
+
+    Cada corpo é fatiado separadamente (par/ímpar dentro do corpo) e os
+    resultados são unidos: assim corpos sobrepostos não viram "buracos".
+    """
+    bodies = list(mesh.split(only_watertight=False)) or [mesh]
+    shapes: list[list[BaseGeometry]] = [[] for _ in heights]
+    for body in bodies:
+        lo, hi = body.bounds[0][2], body.bounds[1][2]
+        idx = [i for i, h in enumerate(heights) if lo <= h <= hi]
+        if not idx:
+            continue
+        sections = body.section_multiplane(
+            plane_origin=[0.0, 0.0, 0.0], plane_normal=[0.0, 0.0, 1.0],
+            heights=[heights[i] for i in idx],
+        )
+        for i, sec in zip(idx, sections):
+            shape = path_to_shape(sec)
+            if not shape.is_empty:
+                shapes[i].append(shape)
+    return [make_valid(unary_union(s)) if s else Polygon() for s in shapes]
+
+
 def slice_mesh(mesh: trimesh.Trimesh, cfg: SliceConfig) -> list[Layer]:
     """Fatia uma malha já preparada (base em Z=0, empilhamento em +Z)."""
     height = float(mesh.bounds[1][2])
     n = layer_count(height, cfg.thickness)
     heights = section_heights(height, n)
-    # Cada corpo é fatiado separadamente (par/ímpar dentro do corpo) e os
-    # resultados são unidos: assim corpos sobrepostos não viram "buracos".
-    bodies = list(mesh.split(only_watertight=False)) or [mesh]
-    shapes: list[list[BaseGeometry]] = [[] for _ in heights]
-    for body in bodies:
-        sections = body.section_multiplane(
-            plane_origin=[0.0, 0.0, 0.0], plane_normal=[0.0, 0.0, 1.0], heights=heights
-        )
-        for i, sec in enumerate(sections):
-            shape = path_to_shape(sec)
-            if not shape.is_empty:
-                shapes[i].append(shape)
+    shapes = section_shapes(mesh, heights)
 
     layers = []
     for i, z in enumerate(heights):
-        merged = make_valid(unary_union(shapes[i])) if shapes[i] else Polygon()
-        layers.append(Layer(index=i, z_cut=float(z), islands=clean_shape(merged, cfg)))
+        layers.append(Layer(index=i, z_cut=float(z), islands=clean_shape(shapes[i], cfg)))
     return layers

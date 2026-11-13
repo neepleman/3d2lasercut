@@ -13,6 +13,7 @@ from .nesting import Sheet, nest
 from .parts import Part, build_parts
 from .pins import Pin, apply_pin_holes, place_pins
 from .slicer import Layer, slice_mesh
+from .waffle import WaffleResult, build_waffle, waffle_preview
 
 
 @dataclass
@@ -23,12 +24,15 @@ class Result:
     sheets: list[Sheet]
     model_height: float
     warnings: list[str] = field(default_factory=list)
+    waffle: WaffleResult | None = None
     files: list[str] = field(default_factory=list)
 
 
 def run(mesh: trimesh.Trimesh, cfg: SliceConfig) -> Result:
     cfg.validate()
     mesh, warnings = prepare_mesh(mesh, cfg)
+    if cfg.mode == "waffle":
+        return _run_waffle(mesh, cfg, warnings)
     layers = slice_mesh(mesh, cfg)
 
     empty = [l.index + 1 for l in layers if not l.islands]
@@ -52,6 +56,20 @@ def run(mesh: trimesh.Trimesh, cfg: SliceConfig) -> Result:
                   model_height=float(mesh.extents[2]), warnings=warnings)
 
 
+def _run_waffle(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) -> Result:
+    wr = build_waffle(mesh, cfg)
+    warnings += wr.warnings
+    sheets = nest(wr.parts, cfg)
+    return Result(layers=[], pins=[], parts=wr.parts, sheets=sheets,
+                  model_height=float(mesh.extents[2]), warnings=warnings, waffle=wr)
+
+
+def build_preview(result: Result, cfg: SliceConfig):
+    if result.waffle is not None:
+        return waffle_preview(result.waffle.placements, cfg.thickness)
+    return preview_mesh(result.layers, cfg)
+
+
 def run_file(path: str, cfg: SliceConfig, out_dir: str,
              formats: tuple[str, ...] = ("svg", "dxf"), preview: bool = True) -> Result:
     result = run(load_mesh(path), cfg)
@@ -69,15 +87,13 @@ def run_file(path: str, cfg: SliceConfig, out_dir: str,
             result.files.append(base + ".dxf")
 
     if preview:
-        pm = preview_mesh(result.layers, cfg)
+        pm = build_preview(result, cfg)
         if pm is not None:
             p = os.path.join(out_dir, f"{stem}_previa.stl")
             pm.export(p)
             result.files.append(p)
 
     report = os.path.join(out_dir, f"{stem}_relatorio.md")
-    write_report(report, source=path, cfg=cfg, layers=result.layers, sheets=result.sheets,
-                 pins=result.pins, warnings=result.warnings,
-                 model_height=result.model_height)
+    write_report(report, source=path, cfg=cfg, result=result)
     result.files.append(report)
     return result

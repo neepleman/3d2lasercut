@@ -26,7 +26,20 @@ class Part:
         return self.shape.buffer(kerf / 2.0, join_style="mitre", mitre_limit=3.0)
 
 
-def _place_label(shape: Polygon, text: str, cfg: SliceConfig) -> MultiLineString | None:
+def merge_lines(*geoms) -> MultiLineString | None:
+    lines = []
+    for g in geoms:
+        if g is None or g.is_empty:
+            continue
+        lines.extend(g.geoms if hasattr(g, "geoms") else [g])
+    return MultiLineString(lines) if lines else None
+
+
+def place_label(shape: Polygon, text: str, cfg: SliceConfig,
+                avoid=None) -> MultiLineString | None:
+    """Grava `text` no ponto mais interno da peça, o maior possível até label_height."""
+    if avoid is not None and not avoid.is_empty:
+        shape = shape.difference(avoid.buffer(1.0))
     inner = shape.buffer(-0.6)
     if inner.is_empty:
         return None
@@ -51,7 +64,7 @@ def build_parts(layers: list[Layer], cfg: SliceConfig) -> tuple[list[Part], list
             name = f"{layer.index + 1}" + (f"-{k + 1}" if multi else "")
             part = Part(name=name, layer_index=layer.index, island_index=k, shape=island)
             if cfg.labels:
-                part.label = _place_label(island, name, cfg)
+                part.label = place_label(island, name, cfg)
                 if part.label is None:
                     warnings.append(f"Peça {name}: pequena demais para gravar a etiqueta.")
             parts.append(part)

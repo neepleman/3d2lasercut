@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import ezdxf
 import trimesh
@@ -105,58 +106,92 @@ def cut_length(sheet: Sheet) -> float:
     return sum(r.length for pp in sheet.placed for p in polygons(pp.cut) for r in _rings(p))
 
 
-def write_report(path: str, *, source: str, cfg: SliceConfig, layers: list[Layer],
-                 sheets: list[Sheet], pins: list[Pin], warnings: list[str],
-                 model_height: float) -> str:
+def _natural_key(name: str):
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
+    sheets: list[Sheet] = result.sheets
     n_parts = sum(len(s.placed) for s in sheets)
-    stack = len(layers) * cfg.thickness
     lines = [
-        f"# Relatório de fatiamento — {os.path.basename(source)}",
+        f"# Relatório de corte — {os.path.basename(source)}",
         "",
         "## Resumo",
+        f"- Modo: {'grade encaixada (waffle)' if cfg.mode == 'waffle' else 'fatias empilhadas'}",
         f"- Material: chapa de {cfg.thickness:g} mm, kerf {cfg.kerf:g} mm",
-        f"- Eixo de empilhamento: {cfg.axis.upper()}",
-        f"- Altura do modelo: {model_height:.1f} mm → pilha montada: {stack:.1f} mm "
-        f"({len(layers)} camadas)",
+        f"- Eixo vertical do modelo: {cfg.axis.upper()}",
+    ]
+    if cfg.mode == "waffle":
+        wr = result.waffle
+        nx = sum(1 for s in wr.slices if s.family == "X" and not s.profile.is_empty)
+        ny = sum(1 for s in wr.slices if s.family == "Y" and not s.profile.is_empty)
+        lines += [
+            f"- Altura do modelo: {result.model_height:.1f} mm",
+            f"- Grade: {nx} fatias X a cada {cfg.grid_x:g} mm, {ny} fatias Y a cada "
+            f"{cfg.grid_y:g} mm, {wr.n_crossings} encaixes",
+            f"- Largura das fendas: {cfg.slot_width:.2f} mm "
+            f"(espessura + folga de {cfg.slot_clearance:g} mm)",
+        ]
+    else:
+        layers: list[Layer] = result.layers
+        stack = len(layers) * cfg.thickness
+        lines.append(f"- Altura do modelo: {result.model_height:.1f} mm → pilha montada: "
+                     f"{stack:.1f} mm ({len(layers)} camadas)")
+    lines += [
         f"- Peças: {n_parts}  |  Chapas de {cfg.sheet_width:g} x {cfg.sheet_height:g} mm: "
-        f"{len(sheets)}",
+        f"{len(sheets)} (nesting: {'contorno real' if cfg.nesting == 'shape' else 'retângulos'})",
         f"- Comprimento total de corte: {sum(cut_length(s) for s in sheets) / 1000:.2f} m",
         "",
         "## Chapas",
     ]
+    usable = (cfg.sheet_width - 2 * cfg.sheet_margin) * (cfg.sheet_height - 2 * cfg.sheet_margin)
     for s in sheets:
-        names = ", ".join(sorted((pp.part.name for pp in s.placed),
-                                 key=lambda n: [int(x) for x in n.split("-")]))
-        lines.append(f"- Chapa {s.index + 1}: {len(s.placed)} peças "
+        names = ", ".join(sorted((pp.part.name for pp in s.placed), key=_natural_key))
+        area = sum(pp.cut.area for pp in s.placed)
+        lines.append(f"- Chapa {s.index + 1}: {len(s.placed)} peças, "
+                     f"{100 * area / usable:.0f}% de aproveitamento "
                      f"(corte {cut_length(s) / 1000:.2f} m) — {names}")
 
-    lines += ["", "## Pinos de alinhamento"]
-    if pins:
-        lines.append(f"Diâmetro do pino: {cfg.pin_diameter:g} mm "
-                     f"(furo de {2 * cfg.pin_hole_radius:.2f} mm). "
-                     "Corte cada cavilha no comprimento indicado (ou um pouco menor).")
-        lines.append("")
-        lines.append("| Pino | Camadas | Comprimento |")
-        lines.append("|---|---|---|")
-        for p in pins:
-            lines.append(f"| P{p.id} | {p.first_layer + 1}–{p.last_layer + 1} | "
-                         f"{p.length(cfg.thickness):.1f} mm |")
-        total = sum(p.length(cfg.thickness) for p in pins)
-        lines.append("")
-        lines.append(f"Total de cavilha: {total / 10:.1f} cm")
+    if cfg.mode == "waffle":
+        lines += [
+            "",
+            "## Montagem",
+            "1. Ao lado de cada fenda está gravado o nome da peça que encaixa nela.",
+            "2. Coloque as peças **X** em pé, em ordem (X1, X2, …). Em cada encaixe, a peça "
+            "com a fenda **aberta para cima** fica por baixo; a outra desce por cima.",
+            "3. Normalmente as peças X recebem as Y por cima; peças soltas no alto do modelo "
+            "(ex.: X1-2) podem ser encaixadas por último, de cima para baixo.",
+            "4. Se o encaixe estiver duro, lixe levemente; se estiver frouxo, aumente "
+            "o kerf ou diminua a folga das fendas na próxima vez.",
+        ]
     else:
-        lines.append("Nenhum pino gerado.")
-
-    lines += [
-        "",
-        "## Montagem",
-        "1. A peça **1** é a base; empilhe em ordem crescente.",
-        "2. A etiqueta gravada (número sublinhado) fica **para cima** e legível.",
-        "3. Peças com sufixo (ex.: 12-1, 12-2) estão na mesma camada.",
-        "4. Use os pinos para alinhar; cole camada a camada.",
-    ]
-    if warnings:
-        lines += ["", "## Avisos"] + [f"- {w}" for w in warnings]
+        pins: list[Pin] = result.pins
+        lines += ["", "## Pinos de alinhamento"]
+        if pins:
+            lines.append(f"Diâmetro do pino: {cfg.pin_diameter:g} mm "
+                         f"(furo de {2 * cfg.pin_hole_radius:.2f} mm). "
+                         "Corte cada cavilha no comprimento indicado (ou um pouco menor).")
+            lines.append("")
+            lines.append("| Pino | Camadas | Comprimento |")
+            lines.append("|---|---|---|")
+            for p in pins:
+                lines.append(f"| P{p.id} | {p.first_layer + 1}–{p.last_layer + 1} | "
+                             f"{p.length(cfg.thickness):.1f} mm |")
+            total = sum(p.length(cfg.thickness) for p in pins)
+            lines.append("")
+            lines.append(f"Total de cavilha: {total / 10:.1f} cm")
+        else:
+            lines.append("Nenhum pino gerado.")
+        lines += [
+            "",
+            "## Montagem",
+            "1. A peça **1** é a base; empilhe em ordem crescente.",
+            "2. A etiqueta gravada (número sublinhado) fica **para cima** e legível.",
+            "3. Peças com sufixo (ex.: 12-1, 12-2) estão na mesma camada.",
+            "4. Use os pinos para alinhar; cole camada a camada.",
+        ]
+    if result.warnings:
+        lines += ["", "## Avisos"] + [f"- {w}" for w in result.warnings]
     text = "\n".join(lines) + "\n"
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)

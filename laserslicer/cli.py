@@ -17,16 +17,34 @@ def _sheet(value: str) -> tuple[float, float]:
         raise argparse.ArgumentTypeError("use o formato LARGURAxALTURA, ex.: 600x400")
 
 
+def _sheet_or_single(value: str) -> tuple[float, float]:
+    try:
+        v = float(value)
+        return v, v
+    except ValueError:
+        return _sheet(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     d = SliceConfig()
     p = argparse.ArgumentParser(
         prog="3d2lasercut",
-        description="Fatia um modelo 3D (STL/OBJ/3MF/PLY) em camadas empilháveis "
-                    "para corte a laser em MDF/acrílico.",
+        description="Transforma um modelo 3D (STL/OBJ/3MF/PLY) em peças para corte a "
+                    "laser em MDF/acrílico: fatias empilhadas ou grade encaixada.",
     )
     p.add_argument("input", help="arquivo do modelo 3D")
     p.add_argument("-o", "--out", default="saida", help="pasta de saída (padrão: saida)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+
+    g = p.add_argument_group("modo")
+    g.add_argument("-m", "--mode", choices=("stack", "waffle"), default=d.mode,
+                   help="stack = fatias empilhadas (padrão); "
+                        "waffle = grade de fatias X/Y encaixadas")
+    g.add_argument("--grid", type=_sheet_or_single, default=(d.grid_x, d.grid_y),
+                   help=f"waffle: espaçamento entre fatias em mm, ex.: 25 ou 20x30 "
+                        f"(padrão {d.grid_x:g})")
+    g.add_argument("--slot-clearance", type=float, default=d.slot_clearance,
+                   help=f"waffle: folga na largura das fendas em mm (padrão {d.slot_clearance})")
 
     g = p.add_argument_group("material e escala")
     g.add_argument("-t", "--thickness", type=float, default=d.thickness,
@@ -68,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--spacing", type=float, default=d.part_spacing,
                    help=f"espaço entre peças em mm (padrão {d.part_spacing})")
     g.add_argument("--no-rotate", action="store_true", help="não girar peças no nesting")
+    g.add_argument("--nesting", choices=("shape", "shelf"), default=d.nesting,
+                   help="shape = pelo contorno real (padrão); shelf = por retângulos (rápido)")
+    g.add_argument("--nest-res", type=float, default=d.nest_resolution,
+                   help=f"resolução do nesting por contorno em mm (padrão {d.nest_resolution}); "
+                        "maior = mais rápido, menor = mais apertado")
 
     g = p.add_argument_group("saída")
     g.add_argument("--format", default="svg,dxf", help="formatos: svg, dxf ou svg,dxf")
@@ -78,6 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = SliceConfig(
+        mode=args.mode, grid_x=args.grid[0], grid_y=args.grid[1],
+        slot_clearance=args.slot_clearance,
+        nesting=args.nesting, nest_resolution=args.nest_res,
         thickness=args.thickness, axis=args.axis, scale=args.scale,
         target_height=args.target_height, kerf=args.kerf,
         min_area=args.min_area, min_feature=args.min_feature,
@@ -96,8 +122,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Erro: {e}", file=sys.stderr)
         return 1
 
-    print(f"{len(result.layers)} camadas, {len(result.parts)} peças, "
-          f"{len(result.sheets)} chapa(s), {len(result.pins)} pinos.")
+    if result.waffle is not None:
+        print(f"Grade: {len(result.parts)} peças, {result.waffle.n_crossings} encaixes, "
+              f"{len(result.sheets)} chapa(s).")
+    else:
+        print(f"{len(result.layers)} camadas, {len(result.parts)} peças, "
+              f"{len(result.sheets)} chapa(s), {len(result.pins)} pinos.")
     for w in result.warnings[:10]:
         print(f"  aviso: {w}")
     if len(result.warnings) > 10:
