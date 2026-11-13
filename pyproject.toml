@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "3d2lasercut"
+version = "0.1.0"
+description = "Fatia modelos 3D em camadas empilháveis para corte a laser (MDF/acrílico)"
+readme = "README.md"
+license = "LGPL-2.1-or-later"
+authors = [{ name = "Neepleman" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "trimesh>=4.0",
+    "shapely>=2.0",
+    "networkx>=3.0",
+    "scipy>=1.10",
+    "ezdxf>=1.1",
+    "mapbox_earcut>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+3d2lasercut = "laserslicer.cli:main"
+
+[tool.setuptools]
+packages = ["laserslicer"]
+
+[project.urls]
+Homepage = "https://github.com/neepleman/3d2lasercut"
