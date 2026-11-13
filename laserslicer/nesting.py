@@ -31,6 +31,7 @@ class PlacedPart:
     part: Part
     cut: Polygon                         # contorno com kerf, já posicionado na chapa
     label: MultiLineString | None        # gravação, já posicionada
+    cut_lines: MultiLineString | None = None  # cortes abertos, já posicionados
 
 
 @dataclass
@@ -62,15 +63,30 @@ def _min_rect_angle(geom: Polygon) -> float:
     return -math.degrees(math.atan2(y1 - y0, x1 - x0))
 
 
+def _rot(g, angle):
+    return rotate(g, angle, origin=(0, 0)) if g is not None else None
+
+
+def _move(g, dx, dy):
+    return translate(g, dx, dy) if g is not None else None
+
+
 def _orient(cut: Polygon, label: BaseGeometry | None, cfg: SliceConfig):
-    """Gira a peça para o retângulo mínimo, deitada (largura >= altura)."""
+    """Ângulo que deixa a peça no retângulo mínimo, deitada (largura >= altura)."""
     angle = _min_rect_angle(cut) if cfg.allow_rotation else 0.0
     minx, miny, maxx, maxy = rotate(cut, angle, origin=(0, 0)).bounds
     if cfg.allow_rotation and (maxy - miny) > (maxx - minx):
         angle += 90.0
-    cut_r = rotate(cut, angle, origin=(0, 0))
-    label_r = rotate(label, angle, origin=(0, 0)) if label is not None else None
-    return cut_r, label_r
+    return angle
+
+
+def _placed(part: Part, cut_rotated, angle: float, dx: float, dy: float) -> PlacedPart:
+    return PlacedPart(
+        part=part,
+        cut=translate(cut_rotated, dx, dy),
+        label=_move(_rot(part.label, angle), dx, dy),
+        cut_lines=_move(_rot(part.cut_lines, angle), dx, dy),
+    )
 
 
 def nest(parts: list[Part], cfg: SliceConfig) -> list[Sheet]:
@@ -94,42 +110,40 @@ def nest_shelf(parts: list[Part], cfg: SliceConfig) -> list[Sheet]:
 
     items = []
     for part in parts:
-        cut, label = _orient(part.cut_shape(cfg.kerf), part.label, cfg)
+        raw = part.cut_shape(cfg.kerf)
+        angle = _orient(raw, part.label, cfg)
+        cut = _rot(raw, angle)
         minx, miny, maxx, maxy = cut.bounds
         w, h = maxx - minx, maxy - miny
         if w > usable_w or h > usable_h:
             if cfg.allow_rotation and h <= usable_w and w <= usable_h:
-                cut = rotate(cut, 90, origin=(0, 0))
-                label = rotate(label, 90, origin=(0, 0)) if label is not None else None
+                angle += 90
+                cut = _rot(raw, angle)
                 minx, miny, maxx, maxy = cut.bounds
                 w, h = maxx - minx, maxy - miny
             else:
                 raise _too_big(part, w, h, usable_w, usable_h)
-        items.append((part, cut, label, w, h))
+        items.append((part, cut, angle, w, h))
 
     # mais altas primeiro, depois mais largas
     items.sort(key=lambda it: (-round(it[4], 3), -it[3]))
 
     sheets: list[Sheet] = []
 
-    def place(sheet: Sheet, shelf: _Shelf, part, cut, label, w):
+    def place(sheet: Sheet, shelf: _Shelf, part, cut, angle, w):
         minx, miny, _, _ = cut.bounds
         dx = cfg.sheet_margin + shelf.x - minx
         dy = cfg.sheet_margin + shelf.y - miny
-        sheet.placed.append(PlacedPart(
-            part=part,
-            cut=translate(cut, dx, dy),
-            label=translate(label, dx, dy) if label is not None else None,
-        ))
+        sheet.placed.append(_placed(part, cut, angle, dx, dy))
         shelf.x += w + gap
 
-    for part, cut, label, w, h in items:
+    for part, cut, angle, w, h in items:
         done = False
         for sheet in sheets:
             # 1) prateleira existente com espaço (best fit: a mais baixa que comporta)
             fits = [s for s in sheet.shelves if s.height >= h and s.x + w <= usable_w + 1e-9]
             if fits:
-                place(sheet, min(fits, key=lambda s: s.height), part, cut, label, w)
+                place(sheet, min(fits, key=lambda s: s.height), part, cut, angle, w)
                 done = True
                 break
             # 2) nova prateleira nessa chapa
@@ -137,7 +151,7 @@ def nest_shelf(parts: list[Part], cfg: SliceConfig) -> list[Sheet]:
             if top + h <= usable_h + 1e-9:
                 shelf = _Shelf(y=top, height=h + gap)
                 sheet.shelves.append(shelf)
-                place(sheet, shelf, part, cut, label, w)
+                place(sheet, shelf, part, cut, angle, w)
                 done = True
                 break
         if not done:
@@ -145,7 +159,7 @@ def nest_shelf(parts: list[Part], cfg: SliceConfig) -> list[Sheet]:
             sheets.append(sheet)
             shelf = _Shelf(y=0.0, height=h + gap)
             sheet.shelves.append(shelf)
-            place(sheet, shelf, part, cut, label, w)
+            place(sheet, shelf, part, cut, angle, w)
 
     return sheets
 
@@ -269,11 +283,5 @@ def nest_shape(parts: list[Part], cfg: SliceConfig) -> list[Sheet]:
         grid.free -= int(r.mask.sum())
         dx = grid.gx0 + col * res - r.x0
         dy = grid.gy0 + row * res - r.y0
-        cut_r = rotate(cut, r.angle, origin=(0, 0))
-        label_r = rotate(part.label, r.angle, origin=(0, 0)) if part.label is not None else None
-        sheet.placed.append(PlacedPart(
-            part=part,
-            cut=translate(cut_r, dx, dy),
-            label=translate(label_r, dx, dy) if label_r is not None else None,
-        ))
+        sheet.placed.append(_placed(part, rotate(cut, r.angle, origin=(0, 0)), r.angle, dx, dy))
     return sheets

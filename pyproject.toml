@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "3d2lasercut"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fatia modelos 3D em camadas empilháveis para corte a laser (MDF/acrílico)"
 readme = "README.md"
 license = "LGPL-2.1-or-later"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "manifold3d>=2.4"]
 
 [project.scripts]
 3d2lasercut = "laserslicer.cli:main"

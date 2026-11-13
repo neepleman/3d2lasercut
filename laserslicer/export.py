@@ -42,6 +42,8 @@ def sheet_to_svg(sheet: Sheet) -> str:
     for pp in sheet.placed:
         for line in _lines(pp.label):
             engrave.append(f'<polyline points="{" ".join(pt(*c) for c in line.coords)}"/>')
+        for line in _lines(pp.cut_lines):
+            holes.append(f'<polyline points="{" ".join(pt(*c) for c in line.coords)}"/>')
         for poly in polygons(pp.cut):
             for ring in poly.interiors:
                 holes.append(f'<polygon points="{" ".join(pt(*c) for c in ring.coords[:-1])}"/>')
@@ -77,6 +79,9 @@ def sheet_to_dxf(sheet: Sheet, path: str) -> None:
         for line in _lines(pp.label):
             msp.add_lwpolyline(list(line.coords), dxfattribs={"layer": "GRAVACAO"})
     for pp in sheet.placed:
+        for line in _lines(pp.cut_lines):
+            msp.add_lwpolyline(list(line.coords), dxfattribs={"layer": "CORTE"})
+    for pp in sheet.placed:
         for poly in polygons(pp.cut):
             for ring in _rings(poly):
                 msp.add_lwpolyline(list(ring.coords)[:-1], close=True,
@@ -103,7 +108,91 @@ def preview_mesh(layers: list[Layer], cfg: SliceConfig) -> trimesh.Trimesh | Non
 # ---------------------------------------------------------------- Relatório
 
 def cut_length(sheet: Sheet) -> float:
-    return sum(r.length for pp in sheet.placed for p in polygons(pp.cut) for r in _rings(p))
+    rings = sum(r.length for pp in sheet.placed for p in polygons(pp.cut) for r in _rings(p))
+    return rings + sum(ln.length for pp in sheet.placed for ln in _lines(pp.cut_lines))
+
+
+MODE_NAMES = {
+    "stack": "fatias empilhadas",
+    "waffle": "grade encaixada (waffle)",
+    "plates": "placas + chapas flexíveis + nervuras internas",
+}
+JOINT_NAMES = {
+    "finger_convex": "dedos",
+    "finger_concave": "dedos, canto interno",
+    "butt_convex": "topo, ângulo ≠ 90°",
+    "open_concave": "aberta, canto interno ≠ 90°",
+}
+
+
+def _plates_sections(cfg: SliceConfig, result) -> list[str]:
+    pi = result.plates
+    lines = ["", "## Placas"]
+    neighbors: dict[int, list[str]] = {P.id: [] for P in pi.plates}
+    for j in pi.joints:
+        neighbors[j.a].append(f"{pi.plates[j.b].name} ({JOINT_NAMES[j.kind]})")
+        neighbors[j.b].append(f"{pi.plates[j.a].name} ({JOINT_NAMES[j.kind]})")
+    tabbed = set()
+    for P in pi.plates:
+        if P.holes:
+            tabbed.add(P.name)
+    lines += ["| Placa | Tamanho | Encaixa em | Abas aparentes |", "|---|---|---|---|"]
+    for P in pi.plates:
+        x0, y0, x1, y1 = P.base.bounds
+        lines.append(f"| {P.name} | {x1 - x0:.0f} x {y1 - y0:.0f} mm | "
+                     f"{', '.join(neighbors[P.id]) or '—'} | "
+                     f"{'sim' if P.name in tabbed else 'não'} |")
+    counts: dict[str, int] = {}
+    for j in pi.joints:
+        counts[j.kind] = counts.get(j.kind, 0) + 1
+    lines.append("")
+    lines.append("Juntas: " + "; ".join(f"{n} × {JOINT_NAMES[k]}" for k, n in counts.items()))
+    if tabbed:
+        lines.append(f"Placas com abas aparentes: {', '.join(sorted(tabbed, key=_natural_key))}. "
+                     "Para esconder as abas numa face de vitrine, use `--no-tabs P1,...` "
+                     "(as nervuras passam a só encostar nela e precisam de cola).")
+    if pi.skins:
+        lines += ["", "## Chapas flexíveis (kerf bending)"]
+        for sk in pi.skins:
+            x0, y0, x1, y1 = sk.shape.bounds
+            ends = ", ".join(sk.end_plates) or "nenhuma (só cola)"
+            lines.append(f"- {sk.name}: {x1 - x0:.0f} x {y1 - y0:.0f} mm planificada, "
+                         f"raio mínimo ≈ {sk.min_radius:.0f} mm, "
+                         f"{len(sk.cut_lines.geoms) if sk.cut_lines else 0} cortes flexíveis; "
+                         f"abas em: {ends}")
+    lines += ["", "## Nervuras internas"]
+    if pi.ribs is not None:
+        lines.append(f"- {len(pi.ribs.parts)} nervuras a cada {pi.rib_spacing:.0f} mm, "
+                     f"{pi.ribs.n_crossings} cruzamentos, {pi.n_tabs} abas nas placas")
+        lines.append(f"- Motivo: {pi.ribs_reason}")
+    else:
+        lines.append(f"- Sem nervuras ({pi.ribs_reason}).")
+    lines += [
+        "",
+        "## Montagem",
+        "1. As etiquetas ficam na face **de dentro** de cada placa (escondidas após montar).",
+    ]
+    step = 2
+    if pi.ribs is not None:
+        lines.append(f"{step}. Monte as nervuras como uma grade: em cada cruzamento, a peça com a "
+                     "fenda aberta para cima fica por baixo. Ao lado de cada fenda está o nome "
+                     "da parceira.")
+        step += 1
+    lines.append(f"{step}. Comece pela placa da base e vá fechando a caixa: cada placa entra "
+                 "na direção perpendicular a ela, com os dedos se intercalando nas quinas"
+                 + (" e as abas das nervuras atravessando os furos." if pi.ribs else "."))
+    step += 1
+    if pi.skins:
+        lines.append(f"{step}. Chapas flexíveis: dobre devagar, com os cortes para dentro da "
+                     "curva. Encaixe as abas numa placa das pontas antes de fechar a do outro "
+                     "lado. As abas ficam em entalhes abertos na borda da placa, então "
+                     "**cole a chapa** nas bordas e nas nervuras.")
+        step += 1
+    lines.append(f"{step}. Juntas de topo (ângulos ≠ 90°) deixam uma fresta em V: preencha com "
+                 "cola e serragem ou massa." if any(j.kind == "butt_convex" for j in pi.joints)
+                 else f"{step}. Cole as juntas com cola branca (PVA) para MDF ou cola de "
+                 "acrílico, conforme o material.")
+    return lines
 
 
 def _natural_key(name: str):
@@ -117,7 +206,7 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
         f"# Relatório de corte — {os.path.basename(source)}",
         "",
         "## Resumo",
-        f"- Modo: {'grade encaixada (waffle)' if cfg.mode == 'waffle' else 'fatias empilhadas'}",
+        f"- Modo: {MODE_NAMES[cfg.mode]}",
         f"- Material: chapa de {cfg.thickness:g} mm, kerf {cfg.kerf:g} mm",
         f"- Eixo vertical do modelo: {cfg.axis.upper()}",
     ]
@@ -131,6 +220,16 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
             f"{cfg.grid_y:g} mm, {wr.n_crossings} encaixes",
             f"- Largura das fendas: {cfg.slot_width:.2f} mm "
             f"(espessura + folga de {cfg.slot_clearance:g} mm)",
+        ]
+    elif cfg.mode == "plates":
+        pi = result.plates
+        lines += [
+            f"- Medidas: {' x '.join(f'{v:.0f}' for v in result.model_extents)} mm",
+            f"- Superfície coberta por placas e chapas flexíveis: {100 * pi.coverage:.0f}%",
+            f"- {len(pi.plates)} placas, {len(pi.skins)} chapas flexíveis, "
+            f"{len(pi.ribs.parts) if pi.ribs else 0} nervuras",
+            f"- Folga dos encaixes: {cfg.slot_clearance:g} mm; dedos de "
+            f"~{cfg.finger_width_eff:g} mm",
         ]
     else:
         layers: list[Layer] = result.layers
@@ -152,7 +251,9 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
                      f"{100 * area / usable:.0f}% de aproveitamento "
                      f"(corte {cut_length(s) / 1000:.2f} m) — {names}")
 
-    if cfg.mode == "waffle":
+    if cfg.mode == "plates":
+        lines += _plates_sections(cfg, result)
+    elif cfg.mode == "waffle":
         lines += [
             "",
             "## Montagem",

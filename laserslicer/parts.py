@@ -18,6 +18,7 @@ class Part:
     island_index: int
     shape: Polygon                      # geometria de projeto (dimensão real da peça)
     label: MultiLineString | None = None
+    cut_lines: MultiLineString | None = None  # cortes abertos (ex.: padrão flexível)
 
     def cut_shape(self, kerf: float) -> Polygon:
         """Contorno a ser seguido pelo laser: expande kerf/2 (furos encolhem kerf/2)."""

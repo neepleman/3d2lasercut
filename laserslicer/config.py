@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class SliceConfig:
     # --- Modo ---
     mode: str = "stack"             # "stack" = fatias empilhadas | "waffle" = grade encaixada
+                                    # "plates" = placas nas faces planas + nervuras internas
 
     # --- Material / fatiamento ---
     thickness: float = 3.0          # espessura real da chapa (mm) — meça com paquímetro!
@@ -20,6 +21,19 @@ class SliceConfig:
     grid_y: float = 25.0            # distância entre as fatias Y (mm)
     slot_clearance: float = 0.1     # folga na largura das fendas (mm)
     min_slot_overlap: float = 0.0   # cruzamentos menores que isso são ignorados (mm)
+
+    # --- Placas (modo plates) ---
+    plate_min_area: float = 400.0   # faces planas menores que isso não viram placa (mm²)
+    plate_min_width: float = 12.0   # nem as mais estreitas que isso (mm)
+    finger_width: float = 0.0       # largura dos dedos (mm); 0 = automático (3 x espessura)
+    ribs: str = "auto"              # nervuras internas: "auto", "none" ou "on"
+    rib_spacing: float = 0.0        # distância entre nervuras (mm); 0 = automático
+    tab_length: float = 0.0         # comprimento das abas nervura->placa (mm); 0 = automático
+    tab_pitch: float = 60.0         # uma aba a cada ~N mm de contato
+    no_tab_plates: tuple = ()      # placas sem furos de aba (faces "de vitrine"), ex.: ("P1",)
+    skins: bool = True              # cobrir superfícies curvas simples com chapa flexível
+    hinge_pitch: float = 0.0        # distância entre colunas de cortes flexíveis (mm); 0 = auto
+    hinge_slit: float = 0.0         # comprimento de cada corte flexível (mm); 0 = auto (20)
 
     # --- Limpeza de geometria ---
     min_area: float = 4.0           # descarta ilhas menores que isso (mm²)
@@ -53,8 +67,10 @@ class SliceConfig:
     def validate(self) -> None:
         if self.thickness <= 0:
             raise ValueError("A espessura deve ser positiva.")
-        if self.mode not in ("stack", "waffle"):
-            raise ValueError("O modo deve ser 'stack' ou 'waffle'.")
+        if self.mode not in ("stack", "waffle", "plates"):
+            raise ValueError("O modo deve ser 'stack', 'waffle' ou 'plates'.")
+        if self.ribs not in ("auto", "none", "on"):
+            raise ValueError("Nervuras: use 'auto', 'none' ou 'on'.")
         if self.nesting not in ("shape", "shelf"):
             raise ValueError("O nesting deve ser 'shape' ou 'shelf'.")
         if self.grid_x <= 0 or self.grid_y <= 0:
@@ -77,6 +93,14 @@ class SliceConfig:
     @property
     def pin_hole_radius(self) -> float:
         return (self.pin_diameter + self.pin_clearance) / 2.0
+
+    @property
+    def finger_width_eff(self) -> float:
+        return self.finger_width if self.finger_width > 0 else max(6.0, 3 * self.thickness)
+
+    @property
+    def tab_length_eff(self) -> float:
+        return self.tab_length if self.tab_length > 0 else max(6.0, 3 * self.thickness)
 
     @property
     def slot_width(self) -> float:

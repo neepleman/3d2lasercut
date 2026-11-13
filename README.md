@@ -1,11 +1,15 @@
 # 3d2lasercut
 
-Transforma um modelo 3D (STL, OBJ, 3MF, PLY…) em **peças para corte a laser** em MDF, acrílico ou qualquer material em chapa, em dois modos:
+Transforma um modelo 3D (STL, OBJ, 3MF, PLY…) em **peças para corte a laser** em MDF, acrílico ou qualquer material em chapa, em três modos:
 
 - **Fatias empilhadas** (`stack`): o modelo vira camadas da espessura da chapa, com furos para **pinos de alinhamento**.
 - **Grade encaixada** (`waffle`): fatias verticais em X e Y com **fendas de meia altura** que se encaixam, sem cola, usando bem menos material.
+- **Placas + estrutura** (`plates`): junta estética e resistência.
+  - As **faces planas** viram placas inteiras, unidas por **finger joints**.
+  - As **superfícies curvas simples** (abóbadas, cilindros, cantos arredondados) viram **chapas flexíveis** (*kerf bending*).
+  - Por dentro, uma grade de **nervuras** se prende às placas por abas.
 
-Em ambos os modos, o programa grava o **nome de cada peça**, compensa o **kerf** do laser e distribui tudo em **chapas**, encaixando as peças pelo **contorno real**. O resultado sai pronto para LightBurn, RDWorks, LaserGRBL etc.
+Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf** do laser e distribui tudo em **chapas**, encaixando as peças pelo **contorno real**. O resultado sai pronto para LightBurn, RDWorks, LaserGRBL etc.
 
 | Fatias empilhadas | Grade encaixada |
 |---|---|
@@ -13,7 +17,15 @@ Em ambos os modos, o programa grava o **nome de cada peça**, compensa o **kerf*
 
 ![Chapa da grade do vaso: peças encaixadas pelo contorno, com o nome da peça parceira ao lado de cada fenda](docs/grade_chapa_vaso.png)
 
-> **Status: v0.2.** Veja o [roteiro](#roteiro).
+**Modo placas.** Placas (bege) por fora, chapa flexível (marrom) na abóbada e nervuras (azul) por dentro:
+
+![Arco no modo placas: montado, visto por baixo e com as placas transparentes](docs/placas_arco.png)
+
+![Caixa arredondada: cantos em chapa flexível e nervuras internas](docs/placas_caixa_arredondada.png)
+
+![Chapa de corte do arco: placas com dedos, nervuras com fendas e a chapa flexível com o padrão de cortes](docs/placas_chapa_arco.png)
+
+> **Status: v0.3.** Veja o [roteiro](#roteiro).
 
 ## Instalação
 
@@ -33,7 +45,7 @@ Requer Python 3.10+. As dependências são `trimesh`, `shapely`, `ezdxf`, `numpy
 | Opção | O que faz | Padrão |
 |---|---|---|
 | `-t, --thickness` | espessura **medida** da chapa (mm) | 3 |
-| `-m, --mode` | `stack` (fatias empilhadas) ou `waffle` (grade encaixada) | stack |
+| `-m, --mode` | `stack` (fatias empilhadas), `waffle` (grade encaixada) ou `plates` (placas + estrutura) | stack |
 | `-a, --axis` | eixo vertical do modelo (empilhamento): `x`, `y`, `z` | z |
 | `-s, --scale` / `-H, --height` | fator de escala, ou altura final desejada (mm) | 1 |
 | `-k, --kerf` | largura do corte do laser (mm) | 0.15 |
@@ -66,6 +78,24 @@ O mesmo vaso como grade encaixada, com fatias a cada 20 mm:
 |---|---|---|
 | `--grid` | espaçamento entre fatias: `25` (X e Y iguais) ou `20x30` | 25 |
 | `--slot-clearance` | folga na largura das fendas (mm) | 0.1 |
+
+### Opções do modo placas (`-m plates`)
+
+| Opção | O que faz | Padrão |
+|---|---|---|
+| `--ribs` | nervuras internas: `auto`, `none`, `on` ou o espaçamento em mm (ex.: `40`) | auto |
+| `--no-tabs` | placas que ficam à vista e **não** devem ter furos de aba, ex.: `P1,P2` | — |
+| `--finger-width` | largura dos dedos das juntas (mm) | 3 × espessura |
+| `--no-skins` | não cobrir as superfícies curvas com chapa flexível | — |
+| `--plate-min-width` | faces planas mais estreitas que isso não viram placa (mm) | 12 |
+
+No modo `auto`, as nervuras entram quando o modelo tem regiões sem cobertura (curvas duplas, como esferas) ou passa de 10 cm. O relatório informa o motivo.
+
+Fluxo sugerido: rode uma vez, veja no relatório a tabela de placas (tamanho, vizinhas e se têm abas aparentes) e rode de novo com `--no-tabs` nas faces "de vitrine".
+
+```bash
+3d2lasercut arco.stl -m plates --ribs 30 --no-tabs P1,P2 -o arco_placas
+```
 
 ### Opções de nesting
 
@@ -102,6 +132,25 @@ O mesmo vaso como grade encaixada, com fatias a cada 20 mm:
 4. **Etiquetas.** Cada peça leva o próprio nome (X1, Y2, X1-2…) e, ao lado de cada fenda, o nome da peça que encaixa ali.
 5. **Kerf.** As fendas encolhem kerf/2 de cada lado e saem na largura certa: espessura + folga.
 
+### Placas + estrutura
+
+1. **Placas.** Faces coplanares e vizinhas formam uma placa. Só viram placa as faces com área e largura mínimas, o que descarta as facetas finas de superfícies curvas. Cada placa fica **para dentro** do modelo, com a face externa coincidindo com a superfície original, e as medidas externas se mantêm.
+2. **Juntas** nas arestas entre placas:
+   - **90° convexo (quina):** finger joint. A placa de menor número fica com os dedos das pontas, o que resolve os cantos onde 3 placas se encontram.
+   - **90° côncavo (canto interno):** os dedos avançam além da aresta para preencher o canto. Nas pontas, recuam se houver uma terceira placa.
+   - **Outros ângulos:** junta de topo. As placas recuam o necessário para não se invadir nem sair do modelo, e sobra uma fresta em V para cola ou massa.
+3. **Chapas flexíveis.** O programa procura regiões curvas em que todas as normais são perpendiculares a um eixo (curvatura simples).
+   - A seção transversal é planificada pelo comprimento de arco, medido no lado côncavo, que não estica.
+   - A chapa recebe o padrão clássico de cortes alternados (*living hinge*).
+   - Ela se prende com abas nas placas das pontas e é recortada onde encontraria outras placas.
+   - Superfícies de dupla curvatura (esferas) ficam a cargo das nervuras.
+4. **Nervuras.** São fatias X/Y como no modo grade, mas recortadas para não invadir as placas nem as chapas flexíveis. O recorte considera a espessura da nervura nas duas faces e no meio.
+   - Onde encostam numa placa perpendicular, as nervuras ganham **abas** que atravessam **furos** na placa (*tab-and-slot*).
+   - As abas evitam os cruzamentos entre nervuras e as pontas das placas.
+5. **Etiquetas** na **face de dentro** de cada placa, escondidas depois de montar.
+
+Os testes montam todas as peças em 3D (booleanas com `manifold3d`) e verificam que **nenhuma peça invade outra nem sai do modelo**: caixa, degrau em L, faces inclinadas, arco, caixa arredondada e cilindro.
+
 ### Nesting pelo contorno real
 
 Cada peça é rasterizada numa grade, já dilatada por metade do espaçamento. Uma correlação via FFT encontra, de uma só vez, todas as posições livres da chapa. Para cada peça, o programa testa 4 rotações e escolhe a posição mais baixa e mais à esquerda, colocando as maiores primeiro. A dilatação é conservadora: o espaçamento mínimo entre peças é sempre respeitado. Peças côncavas se encaixam umas nas outras e peças pequenas podem cair dentro dos furos das grandes. Com `--nesting shelf`, volta o empacotamento por retângulos, mais rápido.
@@ -110,6 +159,8 @@ Cada peça é rasterizada numa grade, já dilatada por metade do espaçamento. U
 
 - **Meça a chapa.** MDF "3 mm" costuma ter entre 2,8 e 3,2 mm. A altura final da pilha é `camadas × espessura`.
 - **Calibre o kerf e a folga** cortando antes uma peça de teste com um furo e um pino.
+- **Chapa flexível:** o raio mínimo de curvatura aparece no relatório. Abaixo de ~4× a espessura, teste a flexão antes; o MDF levemente umedecido dobra melhor.
+- **Placas:** as juntas usam a mesma folga das fendas (`--slot-clearance`). Calibre com um par de placas de teste.
 - **Grade:** um espaçamento menor deixa a peça mais fiel e resistente, mas gasta mais material e tempo de corte. Comece com 3× a 8× a espessura da chapa.
 - **Folga das fendas:** se o encaixe ficar duro, aumente `--slot-clearance`; se ficar frouxo, diminua.
 - Escolha o **eixo** que deixa as fatias mais robustas. Por exemplo, deite uma figura alta se as pernas ficarem finas demais.
@@ -130,17 +181,18 @@ O código fica no pacote Python `laserslicer/`. O núcleo não depende do FreeCA
 config.py    parâmetros            pins.py     pinos de alinhamento
 mesh_io.py   carregar/orientar     parts.py    etiquetas + kerf
 slicer.py    fatiar em camadas     waffle.py   grade encaixada (fendas)
-pipeline.py  orquestra tudo        nesting.py  distribuir nas chapas
-cli.py       linha de comando      export.py   SVG, DXF, prévia, relatório
-                                   font.py     fonte de traço p/ gravação
+plates.py    placas + juntas       skins.py    chapas flexíveis (kerf bending)
+ribs.py      nervuras internas     nesting.py  distribuir nas chapas
+pipeline.py  orquestra tudo        export.py   SVG, DXF, prévia, relatório
+cli.py       linha de comando      font.py     fonte de traço p/ gravação
 ```
 
 ## Roteiro
 
 - [x] **v0.1**: fatias empilhadas, pinos, etiquetas, kerf, nesting por retângulo, SVG/DXF
 - [x] **v0.2**: grade de fatias encaixadas (*waffle*) com fendas e etiquetas de montagem; nesting pelo contorno real
-- [ ] v0.3: modo placas para peças com faces planas (STEP/FreeCAD) com finger joints automáticos
-- [ ] v0.4: workbench do FreeCAD com perguntas ao usuário (juntas fixas/móveis, dobradiças, kerf bending)
+- [x] **v0.3**: modo placas com finger joints automáticos, chapas flexíveis (kerf bending) nas curvas simples e nervuras internas com abas
+- [ ] v0.4: workbench do FreeCAD com perguntas ao usuário (faces de vitrine, juntas fixas/móveis, dobradiças), leitura de STEP
 
 ## Licença
 

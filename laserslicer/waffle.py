@@ -136,13 +136,20 @@ def build_waffle(mesh: trimesh.Trimesh, cfg: SliceConfig) -> WaffleResult:
     prof_x = section_shapes(mx, xs)
     prof_y = section_shapes(my, [-b for b in ys])
 
-    def make(fam, i, pos, prof):
-        islands = clean_shape(prof, cfg)
-        return WaffleSlice(fam, i, pos, unary_union(islands) if islands else Polygon())
+    sx = [make_slice("X", i, a, p, cfg) for i, (a, p) in enumerate(zip(xs, prof_x))]
+    sy = [make_slice("Y", j, b, p, cfg) for j, (b, p) in enumerate(zip(ys, prof_y))]
+    return assemble_waffle(sx, sy, z1, cfg, warnings)
 
-    sx = [make("X", i, a, p) for i, (a, p) in enumerate(zip(xs, prof_x))]
-    sy = [make("Y", j, b, p) for j, (b, p) in enumerate(zip(ys, prof_y))]
 
+def make_slice(fam: str, i: int, pos: float, prof, cfg: SliceConfig) -> WaffleSlice:
+    islands = clean_shape(prof, cfg)
+    return WaffleSlice(fam, i, pos, unary_union(islands) if islands else Polygon())
+
+
+def assemble_waffle(sx: list[WaffleSlice], sy: list[WaffleSlice], z1: float,
+                    cfg: SliceConfig, warnings: list[str] | None = None) -> WaffleResult:
+    """Calcula fendas nos cruzamentos de perfis X/Y prontos e gera as peças."""
+    warnings = [] if warnings is None else warnings
     # ---- cruzamentos -> fendas
     # Duas peças (ilhas) que se cruzam se movem juntas na montagem, então todos
     # os cruzamentos de um mesmo par usam a mesma direção:
