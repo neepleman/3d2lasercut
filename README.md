@@ -256,6 +256,7 @@ freecad/lasercut3d/   workbench: init_gui, commands, panel, fcbridge, deps
 - [x] **v0.4**: workbench do FreeCAD, com painel de opções, prévia 3D ao vivo, vista explodida, placas de vitrine, prévia das chapas e exportação
 - [x] **v0.5**: remoção de arredondamentos e chanfros, com as paredes estendidas até a aresta viva e unidas por dedos
 - [ ] v0.6: reconhecer caixas, com configurações fixas (base, paredes e tampa fixa, removível ou deslizante), divisórias e paredes que se estendem (juntas em T com abas e fendas)
+- [ ] nível de detalhe ajustável (controle no painel): peças pequenas e não estruturais são removidas ou incorporadas à vizinha (degraus e ressaltos achatados, faces estreitas absorvidas como chanfros, ilhas de nervura descartadas)
 - [ ] v0.7: rebaixos (encaixe a meia espessura) gravados pela laser, com decomposição de peças planas grandes ou recortadas (cruz, L, T, molduras) em retângulos sobrepostos
 - [ ] depois: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep)
 
