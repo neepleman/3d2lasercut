@@ -25,7 +25,7 @@ Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf*
 
 ![Chapa de corte do arco: placas com dedos, nervuras com fendas e a chapa flexível com o padrão de cortes](docs/placas_chapa_arco.png)
 
-> **Status: v0.3.** Veja o [roteiro](#roteiro).
+> **Status: v0.4.** Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
 
 ## Instalação
 
@@ -36,7 +36,53 @@ pip install -e .
 
 Requer Python 3.10+. As dependências são `trimesh`, `shapely`, `ezdxf`, `numpy`, `scipy`, `networkx` e `mapbox_earcut`.
 
-## Uso rápido
+## Usar no FreeCAD
+
+O workbench **3D2LaserCut** abre um painel lateral com todas as opções. A prévia aparece **ao vivo** na vista 3D, sobre o seu modelo:
+
+- placas e camadas em bege, chapas flexíveis em marrom, nervuras em azul;
+- um controle de **vista explodida** para ver os encaixes;
+- lista de placas para marcar as **de vitrine** (sem abas aparentes). Clicar numa placa na vista 3D seleciona a linha dela na lista;
+- **Gerar chapas** desenha a distribuição das peças ao lado do modelo: vermelho = corte, azul = gravação;
+- **Exportar…** grava SVG, DXF, prévia STL e relatório numa pasta.
+
+Requer FreeCAD 1.0 ou mais novo (testado para a 1.1).
+
+### Instalação (Windows)
+
+1. Descubra a pasta de addons do seu FreeCAD. No FreeCAD, abra **Exibir → Painéis → Console Python** e digite:
+   ```python
+   print(App.getUserAppDataDir() + "Mod")
+   ```
+   Ela costuma ser algo como `C:\Users\<você>\AppData\Roaming\FreeCAD\v1-1\Mod`.
+2. Ligue o seu clone do projeto a essa pasta com uma *junction*. Não precisa de administrador, e um `git pull` no clone já atualiza o FreeCAD. No PowerShell, troque `<pasta Mod>` pelo caminho do passo 1:
+   ```bash
+   New-Item -ItemType Directory -Force "<pasta Mod>"
+   ```
+   ```bash
+   New-Item -ItemType Junction -Path "<pasta Mod>\3d2lasercut" -Target "C:\Users\<você>\3d2lasercut"
+   ```
+   Alternativa: no **Gerenciador de Addons**, adicione `https://github.com/neepleman/3d2lasercut` (branch `main`) como repositório personalizado e instale por lá.
+3. Reinicie o FreeCAD e escolha o workbench **3D2LaserCut** na lista.
+4. Na primeira vez, clique em **Instalar dependências** (ou ele pergunta sozinho). O botão instala `trimesh`, `shapely`, `ezdxf` e o que mais faltar, dentro do Python do FreeCAD, numa pasta do usuário. O numpy do FreeCAD não é alterado.
+
+### Uso
+
+1. Selecione um sólido (Part/PartDesign, STEP importado) ou uma malha (STL importado).
+2. Clique em **Preparar para corte a laser**.
+3. Ajuste o modo e as opções no painel. A prévia se atualiza sozinha; desmarque "Atualizar sozinho" para modelos pesados.
+4. **Gerar chapas** e depois **Exportar…**.
+5. **OK** mantém a prévia no documento; **Cancelar** apaga a prévia e volta a mostrar o modelo.
+
+### Se algo der errado
+
+- **Erros:** aparecem no próprio painel. Os detalhes técnicos ficam em **Exibir → Painéis → Relatório**.
+- **"Instalar dependências" falhou:** dá para instalar à mão pelo PowerShell. Ajuste o caminho do FreeCAD e a pasta (`py311` = Python 3.11, que é o do FreeCAD 1.1):
+  ```bash
+  & "C:\Program Files\FreeCAD 1.1\bin\python.exe" -m pip install --no-deps --upgrade --target "$env:APPDATA\FreeCAD\v1-1\AdditionalPythonPackages\py311" trimesh shapely ezdxf networkx scipy mapbox_earcut pyparsing typing_extensions fonttools
+  ```
+
+## Uso rápido (linha de comando)
 
 ```bash
 3d2lasercut modelo.stl -t 3 --sheet 600x400 -o saida
@@ -175,7 +221,9 @@ python examples/make_models.py        # gera modelos de teste em examples/models
 3d2lasercut examples/models/vaso.stl -o saida
 ```
 
-O código fica no pacote Python `laserslicer/`. O núcleo não depende do FreeCAD, para poder ser testado e usado pela linha de comando. O workbench do FreeCAD será uma interface por cima dele.
+O código fica no pacote Python `laserslicer/`. O núcleo não depende do FreeCAD, para poder ser testado e usado pela linha de comando. O workbench do FreeCAD (`freecad/lasercut3d/`) é uma interface fina por cima dele. Toda a lógica do painel fica em `laserslicer/session.py` e é testada sem o FreeCAD.
+
+Os testes do painel (`tests/test_v04_freecad.py`) rodam o painel de verdade em Qt (PySide6, sem tela), com uma simulação da API do FreeCAD (`tests/fake_freecad.py`). A integração visual com o FreeCAD real é testada à mão.
 
 ```
 config.py    parâmetros            pins.py     pinos de alinhamento
@@ -185,6 +233,9 @@ plates.py    placas + juntas       skins.py    chapas flexíveis (kerf bending)
 ribs.py      nervuras internas     nesting.py  distribuir nas chapas
 pipeline.py  orquestra tudo        export.py   SVG, DXF, prévia, relatório
 cli.py       linha de comando      font.py     fonte de traço p/ gravação
+assembly.py  peças montadas em 3D  session.py  lógica do painel (sem FreeCAD/Qt)
+
+freecad/lasercut3d/   workbench: init_gui, commands, panel, fcbridge, deps
 ```
 
 ## Roteiro
@@ -192,7 +243,8 @@ cli.py       linha de comando      font.py     fonte de traço p/ gravação
 - [x] **v0.1**: fatias empilhadas, pinos, etiquetas, kerf, nesting por retângulo, SVG/DXF
 - [x] **v0.2**: grade de fatias encaixadas (*waffle*) com fendas e etiquetas de montagem; nesting pelo contorno real
 - [x] **v0.3**: modo placas com finger joints automáticos, chapas flexíveis (kerf bending) nas curvas simples e nervuras internas com abas
-- [ ] v0.4: workbench do FreeCAD com perguntas ao usuário (faces de vitrine, juntas fixas/móveis, dobradiças), leitura de STEP
+- [x] **v0.4**: workbench do FreeCAD, com painel de opções, prévia 3D ao vivo, vista explodida, placas de vitrine, prévia das chapas e exportação
+- [ ] v0.5: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep) em vez da malha
 
 ## Licença
 

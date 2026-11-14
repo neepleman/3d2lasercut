@@ -92,19 +92,6 @@ def sheet_to_dxf(sheet: Sheet, path: str) -> None:
     doc.saveas(path)
 
 
-# ---------------------------------------------------------------- Pré-visualização
-
-def preview_mesh(layers: list[Layer], cfg: SliceConfig) -> trimesh.Trimesh | None:
-    """Empilha as camadas (com furos) como sólidos, para conferir antes de cortar."""
-    meshes = []
-    for layer in layers:
-        for island in layer.islands:
-            m = trimesh.creation.extrude_polygon(island, cfg.thickness)
-            m.apply_translation([0, 0, layer.index * cfg.thickness])
-            meshes.append(m)
-    return trimesh.util.concatenate(meshes) if meshes else None
-
-
 # ---------------------------------------------------------------- Relatório
 
 def cut_length(sheet: Sheet) -> float:

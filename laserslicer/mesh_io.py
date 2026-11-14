@@ -48,6 +48,8 @@ def prepare_mesh(mesh: trimesh.Trimesh, cfg: SliceConfig) -> tuple[trimesh.Trime
                 "incompletas. Considere reparar o modelo (ex.: Meshmixer, PrusaSlicer)."
             )
 
+    # transformação total (modelo original -> preparado), guardada na malha
+    T = np.array(_AXIS_TO_Z[cfg.axis], dtype=float)
     mesh.apply_transform(_AXIS_TO_Z[cfg.axis])
 
     extent_z = float(mesh.extents[2])
@@ -56,6 +58,13 @@ def prepare_mesh(mesh: trimesh.Trimesh, cfg: SliceConfig) -> tuple[trimesh.Trime
     scale = cfg.target_height / extent_z if cfg.target_height else cfg.scale
     if scale != 1.0:
         mesh.apply_scale(scale)
+        S = np.eye(4)
+        S[:3, :3] *= scale
+        T = S @ T
 
-    mesh.apply_translation(-mesh.bounds[0])
+    shift = -np.array(mesh.bounds[0], dtype=float)
+    mesh.apply_translation(shift)
+    M = np.eye(4)
+    M[:3, 3] = shift
+    mesh.metadata["lasercut_transform"] = M @ T
     return mesh, warnings
