@@ -190,3 +190,15 @@ def test_panel_box_mode_and_face_override(env):
     panel.dividers.setChecked(False)
     assert panel.session.cfg.dividers == "none"
     panel.reject()
+
+
+def test_panel_detail_slider(env):
+    doc, src, App, Gui, panel_mod = env
+    panel = panel_mod.LaserCutPanel(src)
+    assert panel.session.cfg.detail == panel_mod.DEFAULT_DETAIL == 50
+    assert panel.detail.value() == 50
+    panel.detail.setValue(10)
+    assert panel.session.cfg.detail == 10 and panel.detail_label.text() == "10"
+    panel.update_preview()
+    assert "Detalhe 10" in panel.info.toPlainText()
+    panel.reject()

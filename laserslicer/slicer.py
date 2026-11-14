@@ -1,6 +1,7 @@
 """Fatiamento da malha em camadas 2D com a espessura do material."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from functools import reduce
 
@@ -74,6 +75,13 @@ def clean_shape(shape: BaseGeometry, cfg: SliceConfig) -> list[Polygon]:
         shape = shape.simplify(cfg.simplify, preserve_topology=True)
     shape = make_valid(shape)
     islands = [p for p in polygons(shape) if p.area >= cfg.min_area]
+    if cfg.min_hole_diameter > 0:  # fecha furos minúsculos
+        a_min = math.pi * (cfg.min_hole_diameter / 2) ** 2
+        islands = [Polygon(p.exterior, [r for r in p.interiors if Polygon(r).area >= a_min])
+                   for p in islands]
+    if cfg.island_min_fraction > 0 and len(islands) > 1:  # descarta lascas
+        biggest = max(p.area for p in islands)
+        islands = [p for p in islands if p.area >= cfg.island_min_fraction * biggest]
     # ordem estável: maior primeiro
     return sorted(islands, key=lambda p: -p.area)
 

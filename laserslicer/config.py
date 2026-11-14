@@ -45,6 +45,12 @@ class SliceConfig:
     dividers: str = "auto"          # divisórias internas: "auto" ou "none"
     divider_min_fraction: float = 0.3  # área mínima da divisória (fração da seção da caixa)
 
+    # --- Nível de detalhe ---
+    detail: float | None = None     # 0 (pouco) a 100 (máximo); None = usa os limites abaixo
+    absorb_depth: float = 0.0       # degraus/ressaltos mais rasos que isso são achatados (mm)
+    island_min_fraction: float = 0.0  # lascas menores que essa fração da peça são descartadas
+    min_hole_diameter: float = 0.0  # furos menores que isso são fechados (mm)
+
     # --- Limpeza de geometria ---
     min_area: float = 4.0           # descarta ilhas menores que isso (mm²)
     min_feature: float = 0.0        # remove detalhes mais finos que isso (mm); 0 = desligado
@@ -90,6 +96,8 @@ class SliceConfig:
             raise ValueError("O espaçamento da grade deve ser positivo.")
         if self.nest_resolution <= 0:
             raise ValueError("A resolução do nesting deve ser positiva.")
+        if self.detail is not None and not (0 <= self.detail <= 100):
+            raise ValueError("O nível de detalhe vai de 0 a 100.")
         if self.axis not in ("x", "y", "z"):
             raise ValueError("O eixo deve ser x, y ou z.")
         if self.scale <= 0:

@@ -225,6 +225,13 @@ class Session:
                 lines.append(f"Nervuras: não ({r.plates.ribs_reason})")
             else:
                 lines.append(f"Nervuras: {r.plates.ribs_reason}")
+        e = r.effective_cfg
+        if e is not None and self.cfg.detail is not None:
+            lines.append(f"Detalhe {self.cfg.detail:.0f}: placas a partir de {e.plate_min_area:.0f} mm²"
+                         + (f", degraus até {e.absorb_depth:.1f} mm achatados"
+                            if e.absorb_depth > 0 else "")
+                         + f", lascas < {100 * e.island_min_fraction:.1f}% e furos < "
+                         f"{e.min_hole_diameter:.1f} mm descartados")
         if r.pins:
             lines.append(f"Pinos de alinhamento: {len(r.pins)}")
         if r.sheets:

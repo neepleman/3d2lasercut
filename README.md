@@ -37,7 +37,11 @@ Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf*
 
 ![Modo caixa: original, montado e explodido](docs/caixa.png)
 
-> **Status: v0.6.** Novidade: **modo caixa**. Uma peça de impressão 3D com dezenas de detalhes vira poucas placas simples. Num suporte de baterias real, foram 62 peças no modo placas contra 12 no modo caixa. Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
+**Nível de detalhe.** Um bloco com ressalto, rebaixo, degrau e encaixe pequenos. No detalhe 0 vira uma caixa simples (6 placas); no 100, cada miudeza vira peça (15 placas):
+
+![Nível de detalhe 0, 50 e 100 (vistas explodidas)](docs/detalhe.png)
+
+> **Status: v0.7.** Novidade: **nível de detalhe** (0 a 100). Com pouco detalhe, peças pequenas e não estruturais somem ou são incorporadas às vizinhas. O modo placas também ficou bem mais robusto com peças de impressão 3D (paredes finas e junções em T). Num suporte de baterias real, foram de 62 peças com sobreposições para 31 peças sem nenhuma, no detalhe 50. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
 
 ## Instalação
 
@@ -106,6 +110,7 @@ Requer FreeCAD 1.0 ou mais novo (testado para a 1.1).
 | `-m, --mode` | `stack` (fatias empilhadas), `waffle` (grade encaixada) ou `plates` (placas + estrutura) | stack |
 | `-a, --axis` | eixo vertical do modelo (empilhamento): `x`, `y`, `z` | z |
 | `-s, --scale` / `-H, --height` | fator de escala, ou altura final desejada (mm) | 1 |
+| `-d, --detail` | nível de detalhe de 0 (pouco) a 100 (tudo); ajusta junto os limites de tamanho. No painel do FreeCAD o padrão é 50 | — |
 | `-k, --kerf` | largura do corte do laser (mm) | 0.15 |
 | `--sheet` | tamanho da chapa `LxA` (mm) | 600x400 |
 | `--margin`, `--spacing` | margem da chapa e espaço entre peças (mm) | 5, 3 |
@@ -241,6 +246,25 @@ Os testes montam todas as peças em 3D (booleanas com `manifold3d`) e verificam 
 5. **Divisórias:** pares de faces internas, paralelas às paredes, separadas por até ~3× a espessura e grandes o suficiente, viram divisórias. Elas usam a mesma lógica das nervuras: abas nas placas e fendas entre si.
 6. **Sugestão automática:** no modo placas, se o modelo parecer uma caixa (muitas placas, quase todas alinhadas aos eixos), o programa sugere o modo caixa.
 
+### Nível de detalhe
+
+Um único controle (0 a 100) ajusta juntos todos os limites de "miudeza". Os limites são proporcionais ao tamanho do modelo e à espessura da chapa. Com pouco detalhe:
+
+- **Faces planas pequenas** deixam de virar placa. O limite vai de 2,5% a 0,1% da área do modelo.
+- **Degraus, ressaltos e rebaixos rasos** (até 3× a espessura) são achatados: a face pequena é incorporada à placa paralela em que encosta, e as paredinhas laterais deles somem.
+- **Lascas** (ilhas pequenas que sobram de uma peça depois de furos e dedos) e pedacinhos de nervura são descartados.
+- **Furos minúsculos** (até 3 mm) são fechados.
+- **Arredondamentos maiores** viram cantos vivos.
+
+Uma opção dada à mão (por exemplo, `--max-fillet 5`) sempre vence o que o nível de detalhe sugere.
+
+O modo placas também passou a tratar dois casos típicos de peças de impressão 3D:
+
+- **Paredes finas:** as duas faces de uma parede mais fina que 2× a espessura viram uma placa só, em vez de duas sobrepostas.
+- **Junções em T:** uma parede em pé no meio de outra placa é recortada onde a outra está. Uma checagem final, depois dos dedos, recorta qualquer invasão que tenha sobrado.
+
+Limitação conhecida: com detalhe alto (75 a 100) em modelos com muitas faces inclinadas pequenas, ainda podem sobrar sobreposições pequenas. O detalhe 50 é o ponto recomendado.
+
 ### Nesting pelo contorno real
 
 Cada peça é rasterizada numa grade, já dilatada por metade do espaçamento. Uma correlação via FFT encontra, de uma só vez, todas as posições livres da chapa. Para cada peça, o programa testa 4 rotações e escolhe a posição mais baixa e mais à esquerda, colocando as maiores primeiro. A dilatação é conservadora: o espaçamento mínimo entre peças é sempre respeitado. Peças côncavas se encaixam umas nas outras e peças pequenas podem cair dentro dos furos das grandes. Com `--nesting shelf`, volta o empacotamento por retângulos, mais rápido.
@@ -275,6 +299,7 @@ mesh_io.py   carregar/orientar     parts.py    etiquetas + kerf
 slicer.py    fatiar em camadas     waffle.py   grade encaixada (fendas)
 plates.py    placas + juntas       skins.py    chapas flexíveis (kerf bending)
 defillet.py  tira arredondamentos  box.py      modo caixa (faces, furos, divisórias)
+detail.py    nível de detalhe
 ribs.py      nervuras internas     nesting.py  distribuir nas chapas
 pipeline.py  orquestra tudo        export.py   SVG, DXF, prévia, relatório
 cli.py       linha de comando      font.py     fonte de traço p/ gravação
@@ -292,8 +317,8 @@ freecad/lasercut3d/   workbench: init_gui, commands, panel, fcbridge, deps
 - [x] **v0.5**: remoção de arredondamentos e chanfros, com as paredes estendidas até a aresta viva e unidas por dedos
 - [x] **v0.6**: modo caixa, com faces automáticas ou forçadas, furos passantes, rebaixos ignorados, divisórias com abas, vários corpos e sugestão automática no modo placas
 - [ ] caixa: tampa removível ou deslizante, divisórias horizontais (prateleiras), caixas fora dos eixos
-- [ ] nível de detalhe ajustável (controle no painel): peças pequenas e não estruturais são removidas ou incorporadas à vizinha (degraus e ressaltos achatados, faces estreitas absorvidas como chanfros, ilhas de nervura descartadas)
-- [ ] v0.7: rebaixos (encaixe a meia espessura) gravados pela laser, com decomposição de peças planas grandes ou recortadas (cruz, L, T, molduras) em retângulos sobrepostos
+- [x] **v0.7**: nível de detalhe (controle de 0 a 100 no painel); paredes finas e junções em T no modo placas
+- [ ] v0.8: rebaixos (encaixe a meia espessura) gravados pela laser, com decomposição de peças planas grandes ou recortadas (cruz, L, T, molduras) em retângulos sobrepostos
 - [ ] depois: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep)
 
 ## Licença

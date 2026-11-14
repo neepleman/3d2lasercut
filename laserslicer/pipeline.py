@@ -13,13 +13,15 @@ from .box import (SIDES, BoxBody, analyze_box, box_joints, build_box_plates, det
                   find_dividers)
 from .config import SliceConfig
 from .defillet import SharpEdge, extend_joints, sharpen
+from .detail import apply_detail, find_plates_absorbing
 from .assembly import assembled_mesh
 from .export import sheet_to_dxf, sheet_to_svg, write_report
 from .mesh_io import load_mesh, prepare_mesh
 from .nesting import Sheet, nest
 from .parts import Part, build_parts, place_label
 from .pins import Pin, apply_pin_holes, place_pins
-from .plates import Joint, Plate, apply_joints, clean_geom, find_joints, find_plates
+from .plates import (Joint, Plate, apply_joints, clean_geom, find_joints, find_plates,
+                     merge_thin_walls, resolve_overlaps)
 from .ribs import build_ribs, want_ribs
 from .skins import Skin, find_skins
 from .slicer import Layer, clean_shape, slice_mesh
@@ -51,6 +53,7 @@ class Result:
     waffle: WaffleResult | None = None
     plates: PlatesInfo | None = None
     model_extents: tuple = ()
+    effective_cfg: SliceConfig | None = None   # depois do nível de detalhe
     transform: np.ndarray = field(default_factory=lambda: np.eye(4))  # original -> preparado
     files: list[str] = field(default_factory=list)
 
@@ -60,14 +63,16 @@ def run(mesh: trimesh.Trimesh, cfg: SliceConfig, nest_parts: bool = True) -> Res
     depois é possível chamar `nest_result`."""
     cfg.validate()
     mesh, warnings = prepare_mesh(mesh, cfg)
-    if cfg.mode == "waffle":
-        result = _run_waffle(mesh, cfg, warnings)
-    elif cfg.mode == "plates":
-        result = _run_plates(mesh, cfg, warnings)
-    elif cfg.mode == "box":
-        result = _run_box(mesh, cfg, warnings)
+    eff = apply_detail(cfg, mesh)
+    if eff.mode == "waffle":
+        result = _run_waffle(mesh, eff, warnings)
+    elif eff.mode == "plates":
+        result = _run_plates(mesh, eff, warnings)
+    elif eff.mode == "box":
+        result = _run_box(mesh, eff, warnings)
     else:
-        result = _run_stack(mesh, cfg, warnings)
+        result = _run_stack(mesh, eff, warnings)
+    result.effective_cfg = eff
     result.transform = mesh.metadata["lasercut_transform"]
     result.model_extents = tuple(float(v) for v in mesh.extents)
     if nest_parts:
@@ -195,17 +200,31 @@ def _run_box(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) -> Re
 
 
 def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) -> Result:
-    plates, face_region = find_plates(mesh, cfg)
+    if cfg.absorb_depth > 0:
+        plates, face_region, n_absorbed = find_plates_absorbing(mesh, cfg)
+        if n_absorbed:
+            warnings.append(f"{n_absorbed} faces pequenas (degraus, ressaltos, rebaixos de até "
+                            f"{cfg.absorb_depth:.1f} mm) foram incorporadas às placas vizinhas.")
+    else:
+        plates, face_region = find_plates(mesh, cfg)
     if not plates:
         raise ValueError("O modelo não tem faces planas grandes o suficiente para virar "
                          "placas. Use o modo 'stack' ou 'waffle'.")
+    plates, face_region, n_thin = merge_thin_walls(plates, face_region, cfg)
+    if n_thin:
+        warnings.append(f"{n_thin} paredes finas (duas faces a menos de 2x a espessura) "
+                        "viraram uma placa só.")
     joints = find_joints(mesh, plates, face_region)
     extra, sharp_edges, sharp_warn = sharpen(mesh, plates, face_region, cfg)
     if sharp_edges:
         extend_joints(joints, plates, cfg.max_fillet_radius)
     joints += extra
     warnings += sharp_warn
+    n_trim = resolve_overlaps(plates, joints, cfg)
+    if n_trim:
+        warnings.append(f"{n_trim} placas recortadas onde encostam no meio de outra (junções em T).")
     warnings += apply_joints(plates, joints, cfg)
+    resolve_overlaps(plates, joints, cfg, final=True)   # sobras de quinas irregulares
 
     skins: list[Skin] = []
     covered = face_region != -1      # placas + arredondamentos absorvidos

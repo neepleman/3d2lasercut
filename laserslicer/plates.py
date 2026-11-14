@@ -329,3 +329,115 @@ def plate_solid(P: Plate, cfg: SliceConfig, shape: BaseGeometry | None = None):
 
 def coverage(mesh: trimesh.Trimesh, plates: list[Plate]) -> float:
     return float(sum(p.area for p in plates) / mesh.area) if mesh.area else 0.0
+
+
+# ------------------------------------------------------------------ paredes finas e "T"
+
+def renumber(plates: list[Plate], face_region: np.ndarray) -> tuple[list[Plate], np.ndarray]:
+    """Ids contínuos (0..n-1, maior área primeiro) e face_region atualizado."""
+    plates = sorted(plates, key=lambda p: -p.base.area)
+    new_region = np.where(face_region < 0, face_region, -1)
+    for i, P in enumerate(plates):
+        new_region[face_region == P.id] = i
+    for i, P in enumerate(plates):
+        P.id = i
+    return plates, new_region
+
+
+def _move_poly(poly_2d, src: Plate, dst: Plate):
+    """Leva um contorno do plano de `src` para o plano (paralelo) de `dst`."""
+    Minv = np.linalg.inv(src.M)
+
+    def mv(coords):
+        c = np.asarray(coords)
+        w = np.column_stack([c, np.zeros(len(c)), np.ones(len(c))]) @ Minv.T
+        return to_local(dst.M, w[:, :3])[:, :2]
+
+    out = [make_valid(Polygon(mv(p.exterior.coords), [mv(r.coords) for r in p.interiors]))
+           for p in polygons(poly_2d)]
+    return unary_union(out) if out else Polygon()
+
+
+def merge_thin_walls(plates: list[Plate], face_region: np.ndarray, cfg: SliceConfig):
+    """Paredes mais finas que 2x a espessura têm duas faces planas opostas; cada
+    uma viraria uma placa para dentro e as duas se sobreporiam. Fica só a maior,
+    com o contorno das duas. Retorna (placas, face_region, quantas uniu)."""
+    t = cfg.thickness
+    removed: set[int] = set()
+    order = sorted(plates, key=lambda p: -p.base.area)
+    for i, A in enumerate(order):
+        if A.id in removed:
+            continue
+        for B in order[i + 1:]:
+            if B.id in removed or float(A.normal @ B.normal) > -0.999:
+                continue
+            gap = float((A.origin - B.origin) @ A.normal)   # B fica "para dentro" de A
+            if not (0.0 < gap < 2 * t + 0.5):
+                continue
+            projB = _move_poly(B.base, B, A)
+            inter = A.base.intersection(projB).area
+            if inter < 0.3 * min(A.base.area, B.base.area):
+                continue
+            A.base = make_valid(unary_union([A.base, projB]))
+            # a face de dentro some (sem gerar juntas pela aresta de dentro, que fica
+            # deslocada pela espessura da parede e desalinharia os dedos)
+            face_region[face_region == B.id] = -2
+            removed.add(B.id)
+    kept = [P for P in plates if P.id not in removed]
+    kept, face_region = renumber(kept, face_region)
+    return kept, face_region, len(removed)
+
+
+def resolve_overlaps(plates: list[Plate], joints: list[Joint], cfg: SliceConfig,
+                     final: bool = False) -> int:
+    """Placas que se sobrepõem sem uma junta entre elas (ex.: parede interna em
+    pé no meio de outra placa, um "T"): a menor é recortada onde a maior está,
+    considerando a espessura toda dela. Retorna quantas foram recortadas.
+
+    Com final=True, roda sobre as formas finais (com dedos), em todos os pares e
+    sem folga: corrige só invasões que sobraram (em juntas certas, nada muda)."""
+    t = cfg.thickness
+    cl = 0.0 if final else cfg.slot_clearance
+    jointed = set() if final else {(min(j.a, j.b), max(j.a, j.b)) for j in joints}
+    solids = {P.id: plate_solid(P, cfg, shape=P.shape if final else P.base) for P in plates}
+    trimmed = 0
+    for A in plates:            # A = a que será recortada (menor)
+        cuts = []
+        sa = solids.get(A.id)
+        if sa is None:
+            continue
+        for B in plates:
+            if B is A or B.base.area < A.base.area:
+                continue
+            if (min(A.id, B.id), max(A.id, B.id)) in jointed:
+                continue
+            if abs(float(A.normal @ B.normal)) > 0.999:
+                continue
+            sb = solids.get(B.id)
+            if sb is None or not (np.all(sa.bounds[0] <= sb.bounds[1]) and
+                                  np.all(sb.bounds[0] <= sa.bounds[1])):
+                continue
+            # marca de B nos planos de A (face externa, meio e face interna)
+            traces = []
+            for w in (0.0, t / 2, t):
+                origin = A.origin - A.normal * w
+                segs = trimesh.intersections.mesh_plane(sb, plane_normal=A.normal,
+                                                        plane_origin=origin)
+                if len(segs) == 0:
+                    continue
+                for loop in trimesh.load_path(np.asarray(segs)).discrete:
+                    loc = to_local(A.M, np.asarray(loop))[:, :2]
+                    if len(loc) >= 3:
+                        traces.append(make_valid(Polygon(loc)))
+            if traces:
+                cuts.append(unary_union(traces).buffer(cl, join_style="mitre"))
+        if cuts:
+            cut = unary_union(cuts)
+            target = A.shape if final else A.base
+            if cut.intersection(target).area > 1e-3:
+                if final:
+                    A.shape = clean_geom(target.difference(cut))
+                else:
+                    A.base = make_valid(target.difference(cut))
+                trimmed += 1
+    return trimmed

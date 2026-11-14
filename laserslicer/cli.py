@@ -96,7 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("-k", "--kerf", type=float, default=d.kerf,
                    help=f"largura do corte do laser em mm (padrão {d.kerf})")
 
-    g = p.add_argument_group("limpeza")
+    g = p.add_argument_group("limpeza e detalhe")
+    g.add_argument("-d", "--detail", type=float, default=None,
+                   help="nível de detalhe de 0 (pouco: some com peças pequenas e não "
+                        "estruturais, achata degraus) a 100 (tudo). Ajusta junto os "
+                        "limites abaixo; opções dadas explicitamente têm prioridade")
     g.add_argument("--min-area", type=float, default=d.min_area,
                    help=f"descarta ilhas menores que isso em mm² (padrão {d.min_area})")
     g.add_argument("--min-feature", type=float, default=d.min_feature,
@@ -144,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         pass
     cfg = SliceConfig(
+        detail=args.detail,
         ribs=ribs, rib_spacing=rib_spacing, finger_width=args.finger_width,
         skins=not args.no_skins, plate_min_width=args.plate_min_width,
         max_fillet_radius=args.max_fillet,

@@ -226,6 +226,7 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
         "## Resumo",
         f"- Modo: {MODE_NAMES[cfg.mode]}",
         f"- Material: chapa de {cfg.thickness:g} mm, kerf {cfg.kerf:g} mm",
+        *([f"- Nível de detalhe: {cfg.detail:.0f} de 100"] if cfg.detail is not None else []),
         f"- Eixo vertical do modelo: {cfg.axis.upper()}",
     ]
     if cfg.mode == "waffle":

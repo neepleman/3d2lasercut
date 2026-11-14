@@ -30,6 +30,7 @@ FACE_STATES = [("auto", "Automático"), ("on", "Fechada"), ("off", "Aberta")]
 AXES = ["z", "x", "y"]
 RIBS = [("auto", "Automático"), ("on", "Sempre"), ("none", "Nunca")]
 DEBOUNCE_MS = 600
+DEFAULT_DETAIL = 50.0
 
 
 def _spin(value, lo, hi, step, decimals=2, suffix=" mm", special=None):
@@ -60,7 +61,7 @@ class LaserCutPanel:
         self.doc = obj.Document
         self.was_visible = bool(getattr(obj.ViewObject, "Visibility", True))
         self.preview = Preview(self.doc)
-        self.session = Session(object_to_trimesh(obj), SliceConfig())
+        self.session = Session(object_to_trimesh(obj), SliceConfig(detail=DEFAULT_DETAIL))
         self.timer = QtCore.QTimer()
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.update_preview)
@@ -118,6 +119,20 @@ class LaserCutPanel:
         f.addRow("Folga", self.clearance)
         f.addRow("Eixo vertical", self.axis)
         f.addRow("Altura final", self.height)
+        h = QtWidgets.QHBoxLayout()
+        self.detail = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.detail.setRange(0, 100)
+        self.detail.setSingleStep(5)
+        self.detail.setPageStep(25)
+        self.detail.setToolTip("Pouco detalhe: peças pequenas e não estruturais somem ou são "
+                               "incorporadas às vizinhas. Muito detalhe: tudo é mantido.")
+        self.detail_label = QtWidgets.QLabel("50")
+        self.detail_label.setMinimumWidth(24)
+        h.addWidget(QtWidgets.QLabel("pouco"))
+        h.addWidget(self.detail, 1)
+        h.addWidget(QtWidgets.QLabel("muito"))
+        h.addWidget(self.detail_label)
+        f.addRow("Detalhe", h)
 
         # 2) opções do modo
         p2 = page("Opções do modo")
@@ -233,6 +248,8 @@ class LaserCutPanel:
         form = self.pages
         # sinais
         self.mode.currentIndexChanged.connect(self._mode_changed)
+        self.detail.valueChanged.connect(lambda v: self.detail_label.setText(str(v)))
+        self.detail.valueChanged.connect(self.on_option_changed)
         for w in (self.thickness, self.kerf, self.clearance, self.height, self.pin_d,
                   self.grid_x, self.grid_y, self.rib_spacing, self.finger, self.max_fillet,
                   self.sheet_w, self.sheet_h):
@@ -258,6 +275,8 @@ class LaserCutPanel:
         self.clearance.setValue(cfg.slot_clearance)
         self.axis.setCurrentIndex(AXES.index(cfg.axis))
         self.height.setValue(cfg.target_height or 0.0)
+        self.detail.setValue(int(round(cfg.detail if cfg.detail is not None else DEFAULT_DETAIL)))
+        self.detail_label.setText(str(self.detail.value()))
         self.pins.setChecked(cfg.pins)
         self.pin_d.setValue(cfg.pin_diameter)
         self.grid_x.setValue(cfg.grid_x)
@@ -286,6 +305,7 @@ class LaserCutPanel:
             slot_clearance=self.clearance.value(),
             axis=self.axis.currentData(),
             target_height=self.height.value() or None,
+            detail=float(self.detail.value()),
             pins=self.pins.isChecked(),
             pin_diameter=self.pin_d.value(),
             grid_x=self.grid_x.value(),
