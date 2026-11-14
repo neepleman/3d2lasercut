@@ -31,3 +31,6 @@ packages = ["laserslicer"]
 
 [project.urls]
 Homepage = "https://github.com/neepleman/3d2lasercut"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
