@@ -25,7 +25,8 @@ from laserslicer.session import KIND_COLORS, MODE_LABELS, Session
 from . import ICON
 from .fcbridge import Preview, object_to_trimesh, safe_name
 
-MODES = ["stack", "waffle", "plates"]
+MODES = ["stack", "waffle", "plates", "box"]
+FACE_STATES = [("auto", "Automático"), ("on", "Fechada"), ("off", "Aberta")]
 AXES = ["z", "x", "y"]
 RIBS = [("auto", "Automático"), ("on", "Sempre"), ("none", "Nunca")]
 DEBOUNCE_MS = 600
@@ -167,6 +168,25 @@ class LaserCutPanel:
         self.plate_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         v.addWidget(self.plate_list)
         self.stack.addWidget(w)
+        # -- caixa
+        from laserslicer.box import SIDE_NAMES
+        w = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(note("Cada face da caixa vira uma placa com os furos que atravessam. "
+                         "Detalhes internos são ignorados."))
+        f = form_layout()
+        self.face_combos = []
+        for name in SIDE_NAMES:
+            cb = QtWidgets.QComboBox()
+            for key, label in FACE_STATES:
+                cb.addItem(label, key)
+            f.addRow(name.capitalize(), cb)
+            self.face_combos.append(cb)
+        self.dividers = QtWidgets.QCheckBox("Divisórias internas")
+        f.addRow(self.dividers)
+        v.addLayout(f)
+        self.stack.addWidget(w)
 
         # 3) prévia
         p3 = page("Prévia")
@@ -217,9 +237,9 @@ class LaserCutPanel:
                   self.grid_x, self.grid_y, self.rib_spacing, self.finger, self.max_fillet,
                   self.sheet_w, self.sheet_h):
             w.valueChanged.connect(self.on_option_changed)
-        for w in (self.axis, self.ribs):
+        for w in (self.axis, self.ribs, *self.face_combos):
             w.currentIndexChanged.connect(self.on_option_changed)
-        for w in (self.pins, self.skins):
+        for w in (self.pins, self.skins, self.dividers):
             w.toggled.connect(self.on_option_changed)
         self.plate_list.itemChanged.connect(self._plate_toggled)
         self.refresh.clicked.connect(self.update_preview)
@@ -247,6 +267,10 @@ class LaserCutPanel:
         self.finger.setValue(cfg.finger_width)
         self.max_fillet.setValue(cfg.max_fillet_radius)
         self.skins.setChecked(cfg.skins)
+        keys = [k for k, _ in FACE_STATES]
+        for cb, state in zip(self.face_combos, cfg.box_faces):
+            cb.setCurrentIndex(keys.index(state))
+        self.dividers.setChecked(cfg.dividers != "none")
         self.sheet_w.setValue(cfg.sheet_width)
         self.sheet_h.setValue(cfg.sheet_height)
         self.show_original.setChecked(False)
@@ -271,6 +295,8 @@ class LaserCutPanel:
             finger_width=self.finger.value(),
             max_fillet_radius=self.max_fillet.value(),
             skins=self.skins.isChecked(),
+            box_faces=tuple(cb.currentData() for cb in self.face_combos),
+            dividers="auto" if self.dividers.isChecked() else "none",
             sheet_width=self.sheet_w.value(),
             sheet_height=self.sheet_h.value(),
         )

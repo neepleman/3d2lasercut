@@ -67,12 +67,20 @@ def _strip_axis(strip: Polygon):
 
 
 def build_ribs(mesh: trimesh.Trimesh, plates: list[Plate], cfg: SliceConfig,
-               warnings: list[str], extra_solids=()) -> tuple[WaffleResult, float, int]:
+               warnings: list[str], extra_solids=(), positions: dict | None = None,
+               index_offset: dict | None = None) -> tuple[WaffleResult, float, int]:
+    """Nervuras X/Y. `positions` ({"X": [...], "Y": [...]}) substitui a grade
+    automática (usado pelas divisórias do modo caixa); `index_offset` desloca a
+    numeração (X1, X2…) para não repetir nomes entre corpos."""
     t, cl = cfg.thickness, cfg.slot_clearance
     spacing = cfg.rib_spacing if cfg.rib_spacing > 0 else auto_spacing(mesh)
     (x0, y0, _), (x1, y1, z1) = mesh.bounds
-    xs = grid_positions(x0, x1, spacing)
-    ys = grid_positions(y0, y1, spacing)
+    if positions is not None:
+        xs, ys = list(positions.get("X", [])), list(positions.get("Y", []))
+    else:
+        xs = grid_positions(x0, x1, spacing)
+        ys = grid_positions(y0, y1, spacing)
+    off = index_offset or {}
     tab_len = cfg.tab_length_eff
     end_margin = t + 1.0
 
@@ -162,7 +170,7 @@ def build_ribs(mesh: trimesh.Trimesh, plates: list[Plate], cfg: SliceConfig,
                         n_tabs += 1
             if tabs:
                 prof = unary_union([prof, *tabs])
-            slices.append(make_slice(fam, i, pos, prof, cfg))
+            slices.append(make_slice(fam, i + off.get(fam, 0), pos, prof, cfg))
         fams[fam] = slices
 
     result = assemble_waffle(fams["X"], fams["Y"], z1, cfg, warnings)

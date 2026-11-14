@@ -26,6 +26,7 @@ MODE_LABELS = {
     "stack": "Fatias empilhadas",
     "waffle": "Grade encaixada",
     "plates": "Placas + estrutura",
+    "box": "Caixa",
 }
 KIND_COLORS = {                      # RGB 0..1, as mesmas cores das imagens do README
     "layer": (0.87, 0.72, 0.47),
@@ -202,6 +203,8 @@ class Session:
         names = {"layer": ("camada", "camadas"), "slice": ("fatia", "fatias"),
                  "plate": ("placa", "placas"), "skin": ("chapa flexível", "chapas flexíveis"),
                  "rib": ("nervura", "nervuras")}
+        if self.cfg.mode == "box":
+            names["rib"] = ("divisória", "divisórias")
         lines.append("Peças: " + ", ".join(f"{n} {names[k][0 if n == 1 else 1]}"
                                            for k, n in counts.items())
                      + f" ({len(r.parts)} no total)")
@@ -212,7 +215,13 @@ class Session:
                 lines.append(f"Arredondamentos removidos: {n_sharp} (viraram cantos vivos)")
             n_fing = sum(1 for j in r.plates.joints if j.kind.startswith("finger"))
             lines.append(f"Juntas com dedos: {n_fing} (use Explodir para ver)")
-            if r.plates.ribs is None:
+            if r.plates.boxes:
+                from .box import SIDE_NAMES
+                for b in r.plates.boxes:
+                    opened = [SIDE_NAMES[f.side] for f in b.faces if not f.exists]
+                    lines.append(f"Caixa {b.index + 1}: abertas: {', '.join(opened) or 'nenhuma'}"
+                                 f"; divisórias: {len(b.dividers)}")
+            elif r.plates.ribs is None:
                 lines.append(f"Nervuras: não ({r.plates.ribs_reason})")
             else:
                 lines.append(f"Nervuras: {r.plates.ribs_reason}")

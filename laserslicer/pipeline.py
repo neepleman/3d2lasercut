@@ -9,6 +9,8 @@ import trimesh
 from shapely.geometry import LineString, MultiLineString, box
 from shapely.ops import unary_union
 
+from .box import (SIDES, BoxBody, analyze_box, box_joints, build_box_plates, detect_bodies,
+                  find_dividers)
 from .config import SliceConfig
 from .defillet import SharpEdge, extend_joints, sharpen
 from .assembly import assembled_mesh
@@ -33,6 +35,7 @@ class PlatesInfo:
     ribs_reason: str
     skins: list[Skin] = field(default_factory=list)
     sharp_edges: list[SharpEdge] = field(default_factory=list)
+    boxes: list[BoxBody] = field(default_factory=list)
     rib_spacing: float = 0.0
     n_tabs: int = 0
 
@@ -61,6 +64,8 @@ def run(mesh: trimesh.Trimesh, cfg: SliceConfig, nest_parts: bool = True) -> Res
         result = _run_waffle(mesh, cfg, warnings)
     elif cfg.mode == "plates":
         result = _run_plates(mesh, cfg, warnings)
+    elif cfg.mode == "box":
+        result = _run_box(mesh, cfg, warnings)
     else:
         result = _run_stack(mesh, cfg, warnings)
     result.transform = mesh.metadata["lasercut_transform"]
@@ -105,6 +110,90 @@ def _run_waffle(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) ->
                   model_height=float(mesh.extents[2]), warnings=warnings, waffle=wr)
 
 
+def _plate_parts(plates: list[Plate], cfg: SliceConfig, warnings: list[str]) -> list[Part]:
+    """Peças cortáveis das placas: furos das abas, limpeza e etiquetas."""
+    parts: list[Part] = []
+    for P in plates:
+        shape = P.shape
+        if P.holes:
+            shape = shape.difference(unary_union(P.holes))
+        P.shape = shape = clean_geom(shape)
+        islands = clean_shape(shape, cfg)
+        multi = len(islands) > 1
+        for k, island in enumerate(islands):
+            name = P.name + (f"-{k + 1}" if multi else "")
+            part = Part(name=name, layer_index=P.id, island_index=k, shape=island)
+            if cfg.labels:
+                part.label = place_label(island, name, cfg)
+                if part.label is None:
+                    warnings.append(f"Peça {name}: pequena demais para gravar a etiqueta.")
+            parts.append(part)
+    return parts
+
+
+def _run_box(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) -> Result:
+    bodies = detect_bodies(mesh, cfg)
+    boxes: list[BoxBody] = []
+    pairs: list[tuple[BoxBody, trimesh.Trimesh]] = []
+    plates: list[Plate] = []
+    joints: list[Joint] = []
+    for bi, body in enumerate(bodies):
+        box = analyze_box(body, bi, cfg)
+        new = build_box_plates(body, box, cfg, first_id=len(plates))
+        if not new:
+            warnings.append(f"Corpo {bi + 1}: nenhuma face da caixa tem material suficiente.")
+            continue
+        plates += new
+        joints += box_joints(box)
+        boxes.append(box)
+        pairs.append((box, body))
+    if not plates:
+        raise ValueError("Não foi possível montar uma caixa: nenhuma face tem material. "
+                         "Force as faces no painel (ou --faces) ou use outro modo.")
+    warnings += apply_joints(plates, joints, cfg)
+
+    # divisórias (por corpo, com numeração contínua X1, X2… entre corpos)
+    rib_parts, rib_pl, rib_slices, n_tabs, n_cross = [], [], [], 0, 0
+    offset = {"X": 0, "Y": 0}
+    for box, body in pairs:
+        divs = find_dividers(body, box, cfg)
+        if not divs:
+            continue
+        pos = {"X": [p for f, p in divs if f == "X"], "Y": [p for f, p in divs if f == "Y"]}
+        rib_warn: list[str] = []
+        wr, _, nt = build_ribs(body, box.plates, cfg, rib_warn, positions=pos,
+                               index_offset=dict(offset))
+        # divisórias numa direção só são normais numa caixa: sem aviso de "grade solta"
+        warnings += [w for w in rib_warn if not w.startswith("Nenhum cruzamento")]
+        offset = {k: offset[k] + len(pos[k]) for k in offset}
+        rib_parts += wr.parts
+        rib_pl += wr.placements
+        rib_slices += wr.slices
+        n_tabs += nt
+        n_cross += wr.n_crossings
+    ribs = (WaffleResult(slices=rib_slices, parts=rib_parts, placements=rib_pl,
+                         n_crossings=n_cross, warnings=[]) if rib_parts else None)
+
+    parts = _plate_parts(plates, cfg, warnings)
+    if ribs is not None:
+        parts += ribs.parts
+    rect_area = 0.0
+    filled = sum(P.base.area for P in plates)
+    for box in boxes:
+        ext = box.hi - box.lo
+        for f in box.faces:
+            if f.exists:
+                a, b = [i for i in range(3) if i != SIDES[f.side][0]]
+                rect_area += ext[a] * ext[b]
+    info = PlatesInfo(plates=plates, joints=joints,
+                      coverage=float(filled / rect_area) if rect_area else 0.0,
+                      ribs=ribs, ribs_reason="divisórias detectadas no modelo"
+                      if ribs is not None else "nenhuma divisória detectada",
+                      n_tabs=n_tabs, boxes=boxes)
+    return Result(layers=[], pins=[], parts=parts, sheets=[],
+                  model_height=float(mesh.extents[2]), warnings=warnings, plates=info)
+
+
 def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) -> Result:
     plates, face_region = find_plates(mesh, cfg)
     if not plates:
@@ -134,22 +223,12 @@ def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) ->
         warnings.append(f"{100 * (1 - cov):.0f}% da superfície não é plana e ficará aberta. "
                         "Ligue as nervuras (--ribs on) para dar forma e estrutura a ela.")
 
-    parts: list[Part] = []
-    for P in plates:
-        shape = P.shape
-        if P.holes:
-            shape = shape.difference(unary_union(P.holes))
-        P.shape = shape = clean_geom(shape)
-        islands = clean_shape(shape, cfg)
-        multi = len(islands) > 1
-        for k, island in enumerate(islands):
-            name = P.name + (f"-{k + 1}" if multi else "")
-            part = Part(name=name, layer_index=P.id, island_index=k, shape=island)
-            if cfg.labels:
-                part.label = place_label(island, name, cfg)
-                if part.label is None:
-                    warnings.append(f"Peça {name}: pequena demais para gravar a etiqueta.")
-            parts.append(part)
+    from .box import axis_aligned_fraction
+    if len(plates) > 12 and axis_aligned_fraction(mesh) >= 0.85:
+        warnings.append(f"O modelo parece uma caixa ({len(plates)} placas, quase todas alinhadas "
+                        "aos eixos). Experimente o modo Caixa: ele ignora detalhes internos e "
+                        "gera bem menos peças.")
+    parts: list[Part] = _plate_parts(plates, cfg, warnings)
     for sk in skins:
         part = Part(name=sk.name, layer_index=1000 + sk.id, island_index=0, shape=sk.shape,
                     cut_lines=sk.cut_lines)

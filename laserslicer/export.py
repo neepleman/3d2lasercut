@@ -103,6 +103,7 @@ MODE_NAMES = {
     "stack": "fatias empilhadas",
     "waffle": "grade encaixada (waffle)",
     "plates": "placas + chapas flexíveis + nervuras internas",
+    "box": "caixa (faces fixas + divisórias)",
 }
 JOINT_NAMES = {
     "finger_convex": "dedos",
@@ -112,9 +113,29 @@ JOINT_NAMES = {
 }
 
 
+def _box_lines(pi) -> list[str]:
+    from .box import SIDE_NAMES
+    lines = ["", "## Caixa"]
+    for b in pi.boxes:
+        ext = b.hi - b.lo
+        closed = [f"{SIDE_NAMES[f.side]} ({100 * f.coverage:.0f}%{', forçada' if f.forced else ''})"
+                  for f in b.faces if f.exists]
+        opened = [SIDE_NAMES[f.side] for f in b.faces if not f.exists]
+        lines.append(f"- Corpo {b.index + 1}: {ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm — "
+                     f"faces: {', '.join(closed) or 'nenhuma'}; abertas: "
+                     f"{', '.join(opened) or 'nenhuma'}; divisórias: {len(b.dividers)}")
+    lines.append("")
+    lines.append("A porcentagem é quanto da face o modelo cobre. Detalhes internos (encaixes, "
+                 "degraus, canais) são ignorados de propósito; rebaixos que não atravessam a "
+                 "parede são preenchidos. Para abrir ou fechar uma face, use `--faces` "
+                 "(ex.: `--faces topo=on,frente=off`) ou o painel.")
+    return lines
+
+
 def _plates_sections(cfg: SliceConfig, result) -> list[str]:
     pi = result.plates
-    lines = ["", "## Placas"]
+    lines = _box_lines(pi) if pi.boxes else []
+    lines += ["", "## Placas"]
     neighbors: dict[int, list[str]] = {P.id: [] for P in pi.plates}
     for j in pi.joints:
         neighbors[j.a].append(f"{pi.plates[j.b].name} ({JOINT_NAMES[j.kind]})")
@@ -154,8 +175,11 @@ def _plates_sections(cfg: SliceConfig, result) -> list[str]:
                          f"raio mínimo ≈ {sk.min_radius:.0f} mm, "
                          f"{len(sk.cut_lines.geoms) if sk.cut_lines else 0} cortes flexíveis; "
                          f"abas em: {ends}")
-    lines += ["", "## Nervuras internas"]
-    if pi.ribs is not None:
+    lines += ["", "## Divisórias" if pi.boxes else "## Nervuras internas"]
+    if pi.ribs is not None and pi.boxes:
+        lines.append(f"- {len(pi.ribs.parts)} divisórias, {pi.ribs.n_crossings} cruzamentos, "
+                     f"{pi.n_tabs} abas nas placas")
+    elif pi.ribs is not None:
         lines.append(f"- {len(pi.ribs.parts)} nervuras a cada {pi.rib_spacing:.0f} mm, "
                      f"{pi.ribs.n_crossings} cruzamentos, {pi.n_tabs} abas nas placas")
         lines.append(f"- Motivo: {pi.ribs_reason}")
@@ -215,7 +239,7 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
             f"- Largura das fendas: {cfg.slot_width:.2f} mm "
             f"(espessura + folga de {cfg.slot_clearance:g} mm)",
         ]
-    elif cfg.mode == "plates":
+    elif cfg.mode in ("plates", "box"):
         pi = result.plates
         lines += [
             f"- Medidas: {' x '.join(f'{v:.0f}' for v in result.model_extents)} mm",
@@ -245,7 +269,7 @@ def write_report(path: str, *, source: str, cfg: SliceConfig, result) -> str:
                      f"{100 * area / usable:.0f}% de aproveitamento "
                      f"(corte {cut_length(s) / 1000:.2f} m) — {names}")
 
-    if cfg.mode == "plates":
+    if cfg.mode in ("plates", "box"):
         lines += _plates_sections(cfg, result)
     elif cfg.mode == "waffle":
         lines += [

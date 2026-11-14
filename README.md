@@ -1,6 +1,6 @@
 # 3d2lasercut
 
-Transforma um modelo 3D (STL, OBJ, 3MF, PLY…) em **peças para corte a laser** em MDF, acrílico ou qualquer material em chapa, em três modos:
+Transforma um modelo 3D (STL, OBJ, 3MF, PLY…) em **peças para corte a laser** em MDF, acrílico ou qualquer material em chapa, em quatro modos:
 
 - **Fatias empilhadas** (`stack`): o modelo vira camadas da espessura da chapa, com furos para **pinos de alinhamento**.
 - **Grade encaixada** (`waffle`): fatias verticais em X e Y com **fendas de meia altura** que se encaixam, sem cola, usando bem menos material.
@@ -8,6 +8,10 @@ Transforma um modelo 3D (STL, OBJ, 3MF, PLY…) em **peças para corte a laser**
   - As **faces planas** viram placas inteiras, unidas por **finger joints**.
   - As **superfícies curvas simples** (abóbadas, cilindros, cantos arredondados) viram **chapas flexíveis** (*kerf bending*).
   - Por dentro, uma grade de **nervuras** se prende às placas por abas.
+- **Caixa** (`box`): para peças que são, no fundo, caixas, como suportes, gabinetes e organizadores.
+  - Cada face da caixa vira uma placa com o contorno e os **furos passantes** do modelo.
+  - Detalhes internos de impressão 3D (encaixes, degraus, canais) são ignorados.
+  - As arestas recebem dedos, e as paredes internas viram **divisórias**.
 
 Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf** do laser e distribui tudo em **chapas**, encaixando as peças pelo **contorno real**. O resultado sai pronto para LightBurn, RDWorks, LaserGRBL etc.
 
@@ -29,7 +33,11 @@ Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf*
 
 ![Caixa arredondada: original, placas montadas com cantos vivos e vista explodida com os dedos](docs/arredondamentos.png)
 
-> **Status: v0.5.** Novidade: **arredondamentos e chanfros viram cantos vivos** automaticamente (ideal para peças feitas para impressão 3D). Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
+**Modo caixa.** Uma caixa de impressão 3D (com furo, rebaixo, ressalto interno e uma divisória) vira 5 placas e 1 divisória. O furo passante é mantido; o rebaixo e o ressalto são ignorados:
+
+![Modo caixa: original, montado e explodido](docs/caixa.png)
+
+> **Status: v0.6.** Novidade: **modo caixa**. Uma peça de impressão 3D com dezenas de detalhes vira poucas placas simples. Num suporte de baterias real, foram 62 peças no modo placas contra 12 no modo caixa. Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
 
 ## Instalação
 
@@ -148,6 +156,20 @@ Fluxo sugerido: rode uma vez, veja no relatório a tabela de placas (tamanho, vi
 3d2lasercut arco.stl -m plates --ribs 30 --no-tabs P1,P2 -o arco_placas
 ```
 
+### Opções do modo caixa (`-m box`)
+
+| Opção | O que faz | Padrão |
+|---|---|---|
+| `--faces` | força faces abertas ou fechadas, ex.: `topo=on,frente=off` (nomes: `esquerda`, `direita`, `frente`, `fundo`, `base`, `topo`) | todas `auto` |
+| `--no-dividers` | não gerar divisórias internas | — |
+| `--max-fillet` | arredondamentos nas bordas das faces até esse raio são completados | 10 |
+
+No modo `auto`, uma face existe se o modelo cobre pelo menos 35% dela. A frente de um suporte, por exemplo, que só tem uma moldura fina, fica aberta. O relatório mostra a cobertura de cada face.
+
+```bash
+3d2lasercut suporte.step -m box --faces topo=on -o suporte_caixa
+```
+
 ### Opções de nesting
 
 | Opção | O que faz | Padrão |
@@ -207,6 +229,18 @@ Fluxo sugerido: rode uma vez, veja no relatório a tabela de placas (tamanho, vi
 
 Os testes montam todas as peças em 3D (booleanas com `manifold3d`) e verificam que **nenhuma peça invade outra nem sai do modelo**: caixa, degrau em L, faces inclinadas, arco, caixa arredondada e cilindro.
 
+### Caixa
+
+1. **Corpos:** cada corpo do arquivo (sólido separado) é uma caixa própria, alinhada aos eixos.
+2. **Faces:** para cada uma das 6 faces, o programa mede quanto o modelo cobre do retângulo da caixa. Acima de 35%, ou se o usuário mandar, a face existe.
+3. **Placa de cada face:** é a projeção da face externa do modelo naquele plano.
+   - **Furos que atravessam** a parede ficam.
+   - **Rebaixos** (há material atrás deles) são preenchidos.
+   - Arredondamentos junto às bordas são completados empurrando o material até a aresta, sem alargar. Assim, entalhes do contorno são preservados.
+4. **Juntas:** cada aresta da caixa onde as duas placas chegam vira junta com dedos. Se uma face tem recortes na borda, a junta é dividida em trechos.
+5. **Divisórias:** pares de faces internas, paralelas às paredes, separadas por até ~3× a espessura e grandes o suficiente, viram divisórias. Elas usam a mesma lógica das nervuras: abas nas placas e fendas entre si.
+6. **Sugestão automática:** no modo placas, se o modelo parecer uma caixa (muitas placas, quase todas alinhadas aos eixos), o programa sugere o modo caixa.
+
 ### Nesting pelo contorno real
 
 Cada peça é rasterizada numa grade, já dilatada por metade do espaçamento. Uma correlação via FFT encontra, de uma só vez, todas as posições livres da chapa. Para cada peça, o programa testa 4 rotações e escolhe a posição mais baixa e mais à esquerda, colocando as maiores primeiro. A dilatação é conservadora: o espaçamento mínimo entre peças é sempre respeitado. Peças côncavas se encaixam umas nas outras e peças pequenas podem cair dentro dos furos das grandes. Com `--nesting shelf`, volta o empacotamento por retângulos, mais rápido.
@@ -240,6 +274,7 @@ config.py    parâmetros            pins.py     pinos de alinhamento
 mesh_io.py   carregar/orientar     parts.py    etiquetas + kerf
 slicer.py    fatiar em camadas     waffle.py   grade encaixada (fendas)
 plates.py    placas + juntas       skins.py    chapas flexíveis (kerf bending)
+defillet.py  tira arredondamentos  box.py      modo caixa (faces, furos, divisórias)
 ribs.py      nervuras internas     nesting.py  distribuir nas chapas
 pipeline.py  orquestra tudo        export.py   SVG, DXF, prévia, relatório
 cli.py       linha de comando      font.py     fonte de traço p/ gravação
@@ -255,7 +290,8 @@ freecad/lasercut3d/   workbench: init_gui, commands, panel, fcbridge, deps
 - [x] **v0.3**: modo placas com finger joints automáticos, chapas flexíveis (kerf bending) nas curvas simples e nervuras internas com abas
 - [x] **v0.4**: workbench do FreeCAD, com painel de opções, prévia 3D ao vivo, vista explodida, placas de vitrine, prévia das chapas e exportação
 - [x] **v0.5**: remoção de arredondamentos e chanfros, com as paredes estendidas até a aresta viva e unidas por dedos
-- [ ] v0.6: reconhecer caixas, com configurações fixas (base, paredes e tampa fixa, removível ou deslizante), divisórias e paredes que se estendem (juntas em T com abas e fendas)
+- [x] **v0.6**: modo caixa, com faces automáticas ou forçadas, furos passantes, rebaixos ignorados, divisórias com abas, vários corpos e sugestão automática no modo placas
+- [ ] caixa: tampa removível ou deslizante, divisórias horizontais (prateleiras), caixas fora dos eixos
 - [ ] nível de detalhe ajustável (controle no painel): peças pequenas e não estruturais são removidas ou incorporadas à vizinha (degraus e ressaltos achatados, faces estreitas absorvidas como chanfros, ilhas de nervura descartadas)
 - [ ] v0.7: rebaixos (encaixe a meia espessura) gravados pela laser, com decomposição de peças planas grandes ou recortadas (cruz, L, T, molduras) em retângulos sobrepostos
 - [ ] depois: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep)

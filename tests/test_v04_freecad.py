@@ -171,3 +171,22 @@ def test_panel_fits_a_narrow_task_panel(env):
             assert w.minimumSizeHint().width() <= 280, (mode, w.windowTitle(),
                                                         w.minimumSizeHint().width())
     panel.reject()
+
+
+def test_panel_box_mode_and_face_override(env):
+    doc, src, App, Gui, panel_mod = env
+    panel = panel_mod.LaserCutPanel(src)
+    panel.mode.setCurrentIndex(panel_mod.MODES.index("box"))
+    assert panel.stack.currentIndex() == panel_mod.MODES.index("box")
+    panel.update_preview()
+    assert panel.session.result is not None, panel.info.toPlainText()
+    assert "Caixa" in panel.info.toPlainText()
+    n_auto = sum(1 for it in panel.session.items if it.kind == "plate")
+    # força o topo aberto: uma placa a menos
+    panel.face_combos[5].setCurrentIndex(2)
+    assert panel.session.cfg.box_faces[5] == "off"
+    panel.update_preview()
+    assert sum(1 for it in panel.session.items if it.kind == "plate") == n_auto - 1
+    panel.dividers.setChecked(False)
+    assert panel.session.cfg.dividers == "none"
+    panel.reject()

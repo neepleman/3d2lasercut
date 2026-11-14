@@ -25,6 +25,19 @@ def _sheet_or_single(value: str) -> tuple[float, float]:
         return _sheet(value)
 
 
+def _faces(value: str) -> tuple:
+    from .box import SIDE_NAMES
+    out = ["auto"] * 6
+    for item in filter(None, (v.strip() for v in value.split(","))):
+        name, _, state = item.partition("=")
+        name, state = name.strip().lower(), state.strip().lower()
+        if name not in SIDE_NAMES or state not in ("on", "off", "auto"):
+            raise argparse.ArgumentTypeError(
+                f"face inválida '{item}': use nome=on|off|auto com nomes {', '.join(SIDE_NAMES)}")
+        out[SIDE_NAMES.index(name)] = state
+    return tuple(out)
+
+
 def build_parser() -> argparse.ArgumentParser:
     d = SliceConfig()
     p = argparse.ArgumentParser(
@@ -37,11 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     g = p.add_argument_group("modo")
-    g.add_argument("-m", "--mode", choices=("stack", "waffle", "plates"), default=d.mode,
+    g.add_argument("-m", "--mode", choices=("stack", "waffle", "plates", "box"), default=d.mode,
                    help="stack = fatias empilhadas (padrão); "
                         "waffle = grade de fatias X/Y encaixadas; "
                         "plates = placas nas faces planas + chapas flexíveis nas curvas "
-                        "+ nervuras internas")
+                        "+ nervuras internas; box = caixa (faces fixas + divisórias)")
     g.add_argument("--grid", type=_sheet_or_single, default=(d.grid_x, d.grid_y),
                    help=f"waffle: espaçamento entre fatias em mm, ex.: 25 ou 20x30 "
                         f"(padrão {d.grid_x:g})")
@@ -64,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--plate-min-width", type=float, default=d.plate_min_width,
                    help=f"faces planas mais estreitas que isso não viram placa "
                         f"(padrão {d.plate_min_width:g} mm)")
+
+    g = p.add_argument_group("modo caixa")
+    g.add_argument("--faces", type=_faces, default=("auto",) * 6,
+                   help="força faces da caixa, ex.: topo=on,frente=off (nomes: esquerda, "
+                        "direita, frente, fundo, base, topo; valores: on, off, auto)")
+    g.add_argument("--no-dividers", action="store_true", help="não gerar divisórias internas")
 
     g = p.add_argument_group("material e escala")
     g.add_argument("-t", "--thickness", type=float, default=d.thickness,
@@ -128,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         ribs=ribs, rib_spacing=rib_spacing, finger_width=args.finger_width,
         skins=not args.no_skins, plate_min_width=args.plate_min_width,
         max_fillet_radius=args.max_fillet,
+        box_faces=args.faces, dividers="none" if args.no_dividers else "auto",
         no_tab_plates=tuple(x.strip().upper() for x in args.no_tabs.split(",") if x.strip()),
         mode=args.mode, grid_x=args.grid[0], grid_y=args.grid[1],
         slot_clearance=args.slot_clearance,
@@ -150,7 +170,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Erro: {e}", file=sys.stderr)
         return 1
 
-    if result.plates is not None:
+    if result.plates is not None and result.plates.boxes:
+        pi = result.plates
+        print(f"Caixa: {len(pi.boxes)} corpo(s), {len(pi.plates)} placas, "
+              f"{len(pi.ribs.parts) if pi.ribs else 0} divisórias, "
+              f"{len(result.sheets)} chapa(s).")
+    elif result.plates is not None:
         pi = result.plates
         print(f"Placas: {len(pi.plates)} placas, {len(pi.skins)} chapas flexíveis, "
               f"{len(pi.ribs.parts) if pi.ribs else 0} nervuras, {len(result.sheets)} chapa(s); "

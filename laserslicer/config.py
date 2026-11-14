@@ -9,6 +9,7 @@ class SliceConfig:
     # --- Modo ---
     mode: str = "stack"             # "stack" = fatias empilhadas | "waffle" = grade encaixada
                                     # "plates" = placas nas faces planas + nervuras internas
+                                    # "box" = caixa: 6 faces fixas + divisórias
 
     # --- Material / fatiamento ---
     thickness: float = 3.0          # espessura real da chapa (mm) — meça com paquímetro!
@@ -35,6 +36,14 @@ class SliceConfig:
     skins: bool = True              # cobrir superfícies curvas simples com chapa flexível
     hinge_pitch: float = 0.0        # distância entre colunas de cortes flexíveis (mm); 0 = auto
     hinge_slit: float = 0.0         # comprimento de cada corte flexível (mm); 0 = auto (20)
+
+    # --- Caixa (modo box) ---
+    # faces na ordem: esquerda (-X), direita (+X), frente (-Y), fundo (+Y), base (-Z), topo (+Z)
+    box_faces: tuple = ("auto",) * 6   # cada uma: "auto", "on" ou "off"
+    box_min_coverage: float = 0.35  # face existe se o modelo cobre essa fração dela
+    box_face_tol: float = 1.0       # distância máx. da face externa ao plano da caixa (mm)
+    dividers: str = "auto"          # divisórias internas: "auto" ou "none"
+    divider_min_fraction: float = 0.3  # área mínima da divisória (fração da seção da caixa)
 
     # --- Limpeza de geometria ---
     min_area: float = 4.0           # descarta ilhas menores que isso (mm²)
@@ -68,8 +77,11 @@ class SliceConfig:
     def validate(self) -> None:
         if self.thickness <= 0:
             raise ValueError("A espessura deve ser positiva.")
-        if self.mode not in ("stack", "waffle", "plates"):
-            raise ValueError("O modo deve ser 'stack', 'waffle' ou 'plates'.")
+        if self.mode not in ("stack", "waffle", "plates", "box"):
+            raise ValueError("O modo deve ser 'stack', 'waffle', 'plates' ou 'box'.")
+        if len(self.box_faces) != 6 or any(f not in ("auto", "on", "off")
+                                           for f in self.box_faces):
+            raise ValueError("box_faces: 6 valores entre 'auto', 'on' e 'off'.")
         if self.ribs not in ("auto", "none", "on"):
             raise ValueError("Nervuras: use 'auto', 'none' ou 'on'.")
         if self.nesting not in ("shape", "shelf"):
