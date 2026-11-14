@@ -12,16 +12,17 @@ import FreeCAD as App
 import FreeCADGui as Gui
 
 try:  # o FreeCAD oferece o "PySide" como camada sobre PySide2/PySide6
-    from PySide import QtCore, QtWidgets
+    from PySide import QtCore, QtGui, QtWidgets
 except ImportError:  # pragma: no cover
     try:
-        from PySide6 import QtCore, QtWidgets
+        from PySide6 import QtCore, QtGui, QtWidgets
     except ImportError:
-        from PySide2 import QtCore, QtWidgets
+        from PySide2 import QtCore, QtGui, QtWidgets
 
 from laserslicer import SliceConfig
 from laserslicer.session import KIND_COLORS, MODE_LABELS, Session
 
+from . import ICON
 from .fcbridge import Preview, object_to_trimesh, safe_name
 
 MODES = ["stack", "waffle", "plates"]
@@ -71,52 +72,69 @@ class LaserCutPanel:
 
     # ------------------------------------------------------------ interface
     def _build_form(self):
-        form = QtWidgets.QWidget()
-        form.setWindowTitle("3D2LaserCut")
-        root = QtWidgets.QVBoxLayout(form)
+        """Vários blocos recolhíveis (lista de widgets), como os painéis nativos.
 
-        title = QtWidgets.QLabel(f"<b>Objeto:</b> {self.obj.Label}")
-        root.addWidget(title)
+        O FreeCAD mostra cada widget da lista como uma caixa com título que
+        pode ser recolhida, e o painel de tarefas rola quando não cabe.
+        Os formulários quebram o rótulo acima do campo quando o painel é
+        estreito, para nunca cortar dos lados.
+        """
+        def page(title):
+            w = QtWidgets.QWidget()
+            w.setWindowTitle(title)
+            w.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+            return w
 
-        # modo
-        box = QtWidgets.QGroupBox("Modo")
-        lay = QtWidgets.QVBoxLayout(box)
+        def form_layout(widget=None):
+            f = QtWidgets.QFormLayout(widget) if widget is not None else QtWidgets.QFormLayout()
+            f.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+            f.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+            return f
+
+        def note(text):
+            lbl = QtWidgets.QLabel(text)
+            lbl.setWordWrap(True)
+            return lbl
+
+        # 1) modelo, modo e material
+        p1 = page("3D2LaserCut")
+        p1.setWindowIcon(QtGui.QIcon(ICON))
+        f = form_layout(p1)
+        f.addRow(note(f"<b>Objeto:</b> {self.obj.Label}"))
         self.mode = QtWidgets.QComboBox()
         for m in MODES:
             self.mode.addItem(MODE_LABELS[m], m)
-        lay.addWidget(self.mode)
-        root.addWidget(box)
-
-        # material
-        box = QtWidgets.QGroupBox("Material e escala")
-        f = QtWidgets.QFormLayout(box)
         self.thickness = _spin(3.0, 0.5, 30, 0.1)
         self.kerf = _spin(0.15, 0.0, 2, 0.01, decimals=3)
         self.clearance = _spin(0.1, 0.0, 2, 0.01, decimals=3)
         self.axis = QtWidgets.QComboBox()
         for a in AXES:
             self.axis.addItem(a.upper(), a)
-        self.height = _spin(0.0, 0.0, 5000, 1, decimals=1, special="tamanho original")
-        f.addRow("Espessura da chapa", self.thickness)
-        f.addRow("Kerf do laser", self.kerf)
-        f.addRow("Folga dos encaixes", self.clearance)
+        self.height = _spin(0.0, 0.0, 5000, 1, decimals=1, special="original")
+        f.addRow("Modo", self.mode)
+        f.addRow("Espessura", self.thickness)
+        f.addRow("Kerf", self.kerf)
+        f.addRow("Folga", self.clearance)
         f.addRow("Eixo vertical", self.axis)
         f.addRow("Altura final", self.height)
-        root.addWidget(box)
 
-        # opções por modo
+        # 2) opções do modo
+        p2 = page("Opções do modo")
+        v2 = QtWidgets.QVBoxLayout(p2)
+        v2.setContentsMargins(0, 0, 0, 0)
         self.stack = QtWidgets.QStackedWidget()
+        v2.addWidget(self.stack)
         # -- pilha
         w = QtWidgets.QWidget()
-        f = QtWidgets.QFormLayout(w)
-        self.pins = QtWidgets.QCheckBox("Furos para pinos de alinhamento")
+        f = form_layout(w)
+        self.pins = QtWidgets.QCheckBox("Furos para pinos")
         self.pin_d = _spin(3.0, 1.0, 20, 0.5)
         f.addRow(self.pins)
         f.addRow("Diâmetro do pino", self.pin_d)
         self.stack.addWidget(w)
         # -- grade
         w = QtWidgets.QWidget()
-        f = QtWidgets.QFormLayout(w)
+        f = form_layout(w)
         self.grid_x = _spin(25.0, 3.0, 1000, 1, decimals=1)
         self.grid_y = _spin(25.0, 3.0, 1000, 1, decimals=1)
         f.addRow("Espaçamento X", self.grid_x)
@@ -125,31 +143,30 @@ class LaserCutPanel:
         # -- placas
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
-        f = QtWidgets.QFormLayout()
+        v.setContentsMargins(0, 0, 0, 0)
+        f = form_layout()
         self.ribs = QtWidgets.QComboBox()
         for key, label in RIBS:
             self.ribs.addItem(label, key)
-        self.rib_spacing = _spin(0.0, 0.0, 1000, 5, decimals=0, special="automático")
-        self.finger = _spin(0.0, 0.0, 200, 1, decimals=1, special="automático")
-        self.skins = QtWidgets.QCheckBox("Chapas flexíveis nas superfícies curvas")
-        f.addRow("Nervuras internas", self.ribs)
-        f.addRow("Espaçamento das nervuras", self.rib_spacing)
+        self.rib_spacing = _spin(0.0, 0.0, 1000, 5, decimals=0, special="auto")
+        self.finger = _spin(0.0, 0.0, 200, 1, decimals=1, special="auto")
+        self.skins = QtWidgets.QCheckBox("Chapas flexíveis nas curvas")
+        f.addRow("Nervuras", self.ribs)
+        f.addRow("Espaçamento", self.rib_spacing)
         f.addRow("Largura dos dedos", self.finger)
         f.addRow(self.skins)
         v.addLayout(f)
-        v.addWidget(QtWidgets.QLabel("Placas — marque as <b>de vitrine</b> (sem abas aparentes).\n"
-                                     "Clique numa placa na vista 3D para achá-la aqui."))
+        v.addWidget(note("Marque as placas <b>de vitrine</b> (sem abas aparentes). "
+                         "Clique numa placa na vista 3D para achá-la aqui."))
         self.plate_list = QtWidgets.QListWidget()
-        self.plate_list.setMinimumHeight(120)
+        self.plate_list.setMinimumHeight(90)
+        self.plate_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         v.addWidget(self.plate_list)
         self.stack.addWidget(w)
-        box = QtWidgets.QGroupBox("Opções do modo")
-        QtWidgets.QVBoxLayout(box).addWidget(self.stack)
-        root.addWidget(box)
 
-        # prévia
-        box = QtWidgets.QGroupBox("Prévia")
-        v = QtWidgets.QVBoxLayout(box)
+        # 3) prévia
+        p3 = page("Prévia")
+        v = QtWidgets.QVBoxLayout(p3)
         h = QtWidgets.QHBoxLayout()
         self.auto = QtWidgets.QCheckBox("Atualizar sozinho")
         self.auto.setChecked(True)
@@ -157,19 +174,17 @@ class LaserCutPanel:
         h.addWidget(self.auto)
         h.addWidget(self.refresh)
         v.addLayout(h)
-        h = QtWidgets.QHBoxLayout()
-        h.addWidget(QtWidgets.QLabel("Explodir"))
+        f = form_layout()
         self.explode = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.explode.setRange(0, 100)
-        h.addWidget(self.explode)
-        v.addLayout(h)
+        f.addRow("Explodir", self.explode)
+        v.addLayout(f)
         self.show_original = QtWidgets.QCheckBox("Mostrar o modelo original")
         v.addWidget(self.show_original)
-        root.addWidget(box)
 
-        # chapas e exportação
-        box = QtWidgets.QGroupBox("Chapas e exportação")
-        f = QtWidgets.QFormLayout(box)
+        # 4) chapas e exportação
+        p4 = page("Chapas e exportação")
+        f = form_layout(p4)
         self.sheet_w = _spin(600, 50, 5000, 10, decimals=0)
         self.sheet_h = _spin(400, 50, 5000, 10, decimals=0)
         f.addRow("Largura da chapa", self.sheet_w)
@@ -180,13 +195,18 @@ class LaserCutPanel:
         h.addWidget(self.btn_sheets)
         h.addWidget(self.btn_export)
         f.addRow(h)
-        root.addWidget(box)
 
+        # 5) resultado
+        p5 = page("Resultado")
+        v = QtWidgets.QVBoxLayout(p5)
         self.info = QtWidgets.QPlainTextEdit()
         self.info.setReadOnly(True)
-        self.info.setMinimumHeight(140)
-        root.addWidget(self.info)
+        self.info.setMinimumHeight(90)
+        self.info.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth)
+        v.addWidget(self.info)
 
+        self.pages = [p1, p2, p3, p4, p5]
+        form = self.pages
         # sinais
         self.mode.currentIndexChanged.connect(self._mode_changed)
         for w in (self.thickness, self.kerf, self.clearance, self.height, self.pin_d,
@@ -345,7 +365,7 @@ class LaserCutPanel:
 
     def export(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self.form, "Pasta para os arquivos de corte", os.path.expanduser("~"))
+            self.pages[0], "Pasta para os arquivos de corte", os.path.expanduser("~"))
         if not folder:
             return
         stem = safe_name(self.obj.Label) or "peca"

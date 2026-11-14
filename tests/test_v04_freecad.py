@@ -152,3 +152,22 @@ def test_deps_pip_command_targets_user_folder(env):
     assert cmd[cmd.index("--target") + 1].startswith(os.path.join("/u/", "AdditionalPythonPackages"))
     assert deps.missing() == []                      # tudo instalado neste ambiente
     assert deps.numpy_problem() is None
+
+
+def test_panel_fits_a_narrow_task_panel(env):
+    """O painel é uma lista de blocos recolhíveis e cabe num painel estreito.
+
+    Regressão: a v0.4 inicial era um bloco único com texto sem quebra de linha,
+    que forçava uma largura mínima maior que o painel e cortava o conteúdo.
+    """
+    doc, src, App, Gui, panel_mod = env
+    panel = panel_mod.LaserCutPanel(src)
+    assert isinstance(panel.form, list) and len(panel.form) >= 4
+    assert all(w.windowTitle() for w in panel.form)
+    for mode in panel_mod.MODES:                       # cada modo mostra opções diferentes
+        panel.stack.setCurrentIndex(panel_mod.MODES.index(mode))
+        for w in panel.form:
+            w.adjustSize()
+            assert w.minimumSizeHint().width() <= 280, (mode, w.windowTitle(),
+                                                        w.minimumSizeHint().width())
+    panel.reject()

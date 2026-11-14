@@ -199,9 +199,11 @@ class Session:
         counts: dict[str, int] = {}
         for it in self.items:
             counts[it.kind] = counts.get(it.kind, 0) + 1
-        names = {"layer": "camadas", "slice": "fatias", "plate": "placas",
-                 "skin": "chapas flexíveis", "rib": "nervuras"}
-        lines.append("Peças: " + ", ".join(f"{n} {names[k]}" for k, n in counts.items())
+        names = {"layer": ("camada", "camadas"), "slice": ("fatia", "fatias"),
+                 "plate": ("placa", "placas"), "skin": ("chapa flexível", "chapas flexíveis"),
+                 "rib": ("nervura", "nervuras")}
+        lines.append("Peças: " + ", ".join(f"{n} {names[k][0 if n == 1 else 1]}"
+                                           for k, n in counts.items())
                      + f" ({len(r.parts)} no total)")
         if r.plates is not None:
             lines.append(f"Superfície coberta: {100 * r.plates.coverage:.0f}%")
