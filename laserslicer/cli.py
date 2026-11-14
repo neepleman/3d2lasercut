@@ -56,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-tabs", default="",
                    help="placas sem furos de aba, ex.: P1,P2 (faces que ficam à vista; "
                         "as nervuras só encostam nelas e precisam de cola)")
+    g.add_argument("--max-fillet", type=float, default=d.max_fillet_radius,
+                   help=f"remove arredondamentos e chanfros até esse raio, estendendo as "
+                        f"paredes até a aresta viva (padrão {d.max_fillet_radius:g} mm; 0 = não)")
     g.add_argument("--no-skins", action="store_true",
                    help="não cobrir superfícies curvas com chapa flexível")
     g.add_argument("--plate-min-width", type=float, default=d.plate_min_width,
@@ -124,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = SliceConfig(
         ribs=ribs, rib_spacing=rib_spacing, finger_width=args.finger_width,
         skins=not args.no_skins, plate_min_width=args.plate_min_width,
+        max_fillet_radius=args.max_fillet,
         no_tab_plates=tuple(x.strip().upper() for x in args.no_tabs.split(",") if x.strip()),
         mode=args.mode, grid_x=args.grid[0], grid_y=args.grid[1],
         slot_clearance=args.slot_clearance,

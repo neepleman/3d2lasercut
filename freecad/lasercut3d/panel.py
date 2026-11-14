@@ -150,10 +150,14 @@ class LaserCutPanel:
             self.ribs.addItem(label, key)
         self.rib_spacing = _spin(0.0, 0.0, 1000, 5, decimals=0, special="auto")
         self.finger = _spin(0.0, 0.0, 200, 1, decimals=1, special="auto")
+        self.max_fillet = _spin(10.0, 0.0, 200, 1, decimals=1, special="não remover")
+        self.max_fillet.setToolTip("Arredondamentos e chanfros até esse raio são removidos: "
+                                   "as paredes vão até a aresta viva e ganham dedos.")
         self.skins = QtWidgets.QCheckBox("Chapas flexíveis nas curvas")
         f.addRow("Nervuras", self.ribs)
         f.addRow("Espaçamento", self.rib_spacing)
         f.addRow("Largura dos dedos", self.finger)
+        f.addRow("Tirar arredondamentos até", self.max_fillet)
         f.addRow(self.skins)
         v.addLayout(f)
         v.addWidget(note("Marque as placas <b>de vitrine</b> (sem abas aparentes). "
@@ -210,7 +214,7 @@ class LaserCutPanel:
         # sinais
         self.mode.currentIndexChanged.connect(self._mode_changed)
         for w in (self.thickness, self.kerf, self.clearance, self.height, self.pin_d,
-                  self.grid_x, self.grid_y, self.rib_spacing, self.finger,
+                  self.grid_x, self.grid_y, self.rib_spacing, self.finger, self.max_fillet,
                   self.sheet_w, self.sheet_h):
             w.valueChanged.connect(self.on_option_changed)
         for w in (self.axis, self.ribs):
@@ -241,6 +245,7 @@ class LaserCutPanel:
         self.ribs.setCurrentIndex([k for k, _ in RIBS].index(cfg.ribs))
         self.rib_spacing.setValue(cfg.rib_spacing)
         self.finger.setValue(cfg.finger_width)
+        self.max_fillet.setValue(cfg.max_fillet_radius)
         self.skins.setChecked(cfg.skins)
         self.sheet_w.setValue(cfg.sheet_width)
         self.sheet_h.setValue(cfg.sheet_height)
@@ -264,6 +269,7 @@ class LaserCutPanel:
             ribs=ribs,
             rib_spacing=self.rib_spacing.value(),
             finger_width=self.finger.value(),
+            max_fillet_radius=self.max_fillet.value(),
             skins=self.skins.isChecked(),
             sheet_width=self.sheet_w.value(),
             sheet_height=self.sheet_h.value(),

@@ -25,7 +25,11 @@ Em todos os modos, o programa grava o **nome de cada peça**, compensa o **kerf*
 
 ![Chapa de corte do arco: placas com dedos, nervuras com fendas e a chapa flexível com o padrão de cortes](docs/placas_chapa_arco.png)
 
-> **Status: v0.4.** Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
+**Arredondamentos removidos.** O modelo de impressão 3D, todo arredondado (à esquerda), vira uma caixa de cantos vivos com dedos nas 12 arestas (no centro, montada; à direita, explodida):
+
+![Caixa arredondada: original, placas montadas com cantos vivos e vista explodida com os dedos](docs/arredondamentos.png)
+
+> **Status: v0.5.** Novidade: **arredondamentos e chanfros viram cantos vivos** automaticamente (ideal para peças feitas para impressão 3D). Agora também como **workbench do FreeCAD**, com prévia ao vivo. Veja [Usar no FreeCAD](#usar-no-freecad) e o [roteiro](#roteiro).
 
 ## Instalação
 
@@ -132,6 +136,7 @@ O mesmo vaso como grade encaixada, com fatias a cada 20 mm:
 | `--ribs` | nervuras internas: `auto`, `none`, `on` ou o espaçamento em mm (ex.: `40`) | auto |
 | `--no-tabs` | placas que ficam à vista e **não** devem ter furos de aba, ex.: `P1,P2` | — |
 | `--finger-width` | largura dos dedos das juntas (mm) | 3 × espessura |
+| `--max-fillet` | remove arredondamentos e chanfros até esse raio, estendendo as paredes até a aresta viva (`0` = não remove) | 10 |
 | `--no-skins` | não cobrir as superfícies curvas com chapa flexível | — |
 | `--plate-min-width` | faces planas mais estreitas que isso não viram placa (mm) | 12 |
 
@@ -181,19 +186,24 @@ Fluxo sugerido: rode uma vez, veja no relatório a tabela de placas (tamanho, vi
 ### Placas + estrutura
 
 1. **Placas.** Faces coplanares e vizinhas formam uma placa. Só viram placa as faces com área e largura mínimas, o que descarta as facetas finas de superfícies curvas. Cada placa fica **para dentro** do modelo, com a face externa coincidindo com a superfície original, e as medidas externas se mantêm.
-2. **Juntas** nas arestas entre placas:
+2. **Arredondamentos e chanfros** de até `--max-fillet` mm são removidos antes das juntas:
+   - Cada face curva ou chanfrada entre duas placas é reconhecida pela normal ("entre" as normais das duas paredes) e pela posição. Ela também precisa encostar nas **duas** paredes; um trecho de curva maior não conta.
+   - As duas placas são estendidas até a **aresta viva** (a interseção dos planos delas), e a aresta é levada até o canto, onde encontra uma terceira placa.
+   - As placas nas pontas têm o canto do contorno completado (canto externo) ou recortado (canto interno).
+   - A aresta viva vira uma junta normal, com dedos. Curvas maiores continuam como chapas flexíveis.
+3. **Juntas** nas arestas entre placas:
    - **90° convexo (quina):** finger joint. A placa de menor número fica com os dedos das pontas, o que resolve os cantos onde 3 placas se encontram.
    - **90° côncavo (canto interno):** os dedos avançam além da aresta para preencher o canto. Nas pontas, recuam se houver uma terceira placa.
    - **Outros ângulos:** junta de topo. As placas recuam o necessário para não se invadir nem sair do modelo, e sobra uma fresta em V para cola ou massa.
-3. **Chapas flexíveis.** O programa procura regiões curvas em que todas as normais são perpendiculares a um eixo (curvatura simples).
+4. **Chapas flexíveis.** O programa procura regiões curvas em que todas as normais são perpendiculares a um eixo (curvatura simples).
    - A seção transversal é planificada pelo comprimento de arco, medido no lado côncavo, que não estica.
    - A chapa recebe o padrão clássico de cortes alternados (*living hinge*).
    - Ela se prende com abas nas placas das pontas e é recortada onde encontraria outras placas.
    - Superfícies de dupla curvatura (esferas) ficam a cargo das nervuras.
-4. **Nervuras.** São fatias X/Y como no modo grade, mas recortadas para não invadir as placas nem as chapas flexíveis. O recorte considera a espessura da nervura nas duas faces e no meio.
+5. **Nervuras.** São fatias X/Y como no modo grade, mas recortadas para não invadir as placas nem as chapas flexíveis. O recorte considera a espessura da nervura nas duas faces e no meio.
    - Onde encostam numa placa perpendicular, as nervuras ganham **abas** que atravessam **furos** na placa (*tab-and-slot*).
    - As abas evitam os cruzamentos entre nervuras e as pontas das placas.
-5. **Etiquetas** na **face de dentro** de cada placa, escondidas depois de montar.
+6. **Etiquetas** na **face de dentro** de cada placa, escondidas depois de montar.
 
 Os testes montam todas as peças em 3D (booleanas com `manifold3d`) e verificam que **nenhuma peça invade outra nem sai do modelo**: caixa, degrau em L, faces inclinadas, arco, caixa arredondada e cilindro.
 
@@ -244,7 +254,10 @@ freecad/lasercut3d/   workbench: init_gui, commands, panel, fcbridge, deps
 - [x] **v0.2**: grade de fatias encaixadas (*waffle*) com fendas e etiquetas de montagem; nesting pelo contorno real
 - [x] **v0.3**: modo placas com finger joints automáticos, chapas flexíveis (kerf bending) nas curvas simples e nervuras internas com abas
 - [x] **v0.4**: workbench do FreeCAD, com painel de opções, prévia 3D ao vivo, vista explodida, placas de vitrine, prévia das chapas e exportação
-- [ ] v0.5: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep) em vez da malha
+- [x] **v0.5**: remoção de arredondamentos e chanfros, com as paredes estendidas até a aresta viva e unidas por dedos
+- [ ] v0.6: reconhecer caixas, com configurações fixas (base, paredes e tampa fixa, removível ou deslizante), divisórias e paredes que se estendem (juntas em T com abas e fendas)
+- [ ] v0.7: rebaixos (encaixe a meia espessura) gravados pela laser, com decomposição de peças planas grandes ou recortadas (cruz, L, T, molduras) em retângulos sobrepostos
+- [ ] depois: cálculo em segundo plano (sem travar a interface), juntas móveis/dobradiças, placas a partir das faces exatas do sólido (B-rep)
 
 ## Licença
 

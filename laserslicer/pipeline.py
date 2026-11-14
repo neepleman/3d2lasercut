@@ -10,13 +10,14 @@ from shapely.geometry import LineString, MultiLineString, box
 from shapely.ops import unary_union
 
 from .config import SliceConfig
+from .defillet import SharpEdge, extend_joints, sharpen
 from .assembly import assembled_mesh
 from .export import sheet_to_dxf, sheet_to_svg, write_report
 from .mesh_io import load_mesh, prepare_mesh
 from .nesting import Sheet, nest
 from .parts import Part, build_parts, place_label
 from .pins import Pin, apply_pin_holes, place_pins
-from .plates import Joint, Plate, apply_joints, coverage, find_joints, find_plates
+from .plates import Joint, Plate, apply_joints, clean_geom, find_joints, find_plates
 from .ribs import build_ribs, want_ribs
 from .skins import Skin, find_skins
 from .slicer import Layer, clean_shape, slice_mesh
@@ -31,6 +32,7 @@ class PlatesInfo:
     ribs: WaffleResult | None
     ribs_reason: str
     skins: list[Skin] = field(default_factory=list)
+    sharp_edges: list[SharpEdge] = field(default_factory=list)
     rib_spacing: float = 0.0
     n_tabs: int = 0
 
@@ -109,15 +111,20 @@ def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) ->
         raise ValueError("O modelo não tem faces planas grandes o suficiente para virar "
                          "placas. Use o modo 'stack' ou 'waffle'.")
     joints = find_joints(mesh, plates, face_region)
+    extra, sharp_edges, sharp_warn = sharpen(mesh, plates, face_region, cfg)
+    if sharp_edges:
+        extend_joints(joints, plates, cfg.max_fillet_radius)
+    joints += extra
+    warnings += sharp_warn
     warnings += apply_joints(plates, joints, cfg)
 
     skins: list[Skin] = []
-    covered_area = 0.0
+    covered = face_region != -1      # placas + arredondamentos absorvidos
     if cfg.skins:
-        skins, covered, skin_warn = find_skins(mesh, face_region, plates, cfg)
+        skins, skin_cov, skin_warn = find_skins(mesh, face_region, plates, cfg)
         warnings += skin_warn
-        covered_area = float(mesh.area_faces[covered].sum())
-    cov = coverage(mesh, plates) + covered_area / mesh.area
+        covered = covered | skin_cov
+    cov = float(mesh.area_faces[covered].sum() / mesh.area)
 
     use_ribs, reason = want_ribs(mesh, cov, cfg)
     skin_solids = [sk.solid(cfg.thickness) for sk in skins]
@@ -132,7 +139,7 @@ def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) ->
         shape = P.shape
         if P.holes:
             shape = shape.difference(unary_union(P.holes))
-        P.shape = shape
+        P.shape = shape = clean_geom(shape)
         islands = clean_shape(shape, cfg)
         multi = len(islands) > 1
         for k, island in enumerate(islands):
@@ -165,7 +172,8 @@ def _run_plates(mesh: trimesh.Trimesh, cfg: SliceConfig, warnings: list[str]) ->
         parts += ribs.parts
 
     info = PlatesInfo(plates=plates, joints=joints, coverage=cov, ribs=ribs,
-                      ribs_reason=reason, rib_spacing=spacing, n_tabs=n_tabs, skins=skins)
+                      ribs_reason=reason, rib_spacing=spacing, n_tabs=n_tabs, skins=skins,
+                      sharp_edges=sharp_edges)
     return Result(layers=[], pins=[], parts=parts, sheets=[],
                   model_height=float(mesh.extents[2]), warnings=warnings, plates=info)
 

@@ -2,7 +2,7 @@
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>3D2LaserCut</name>
   <description>Transforma peças 3D em peças para corte a laser em MDF ou acrílico: fatias empilhadas, grade encaixada ou placas com finger joints, chapas flexíveis e nervuras internas.</description>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
   <date>2026-11-14</date>
   <maintainer email="neepleman@users.noreply.github.com">Neepleman</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>

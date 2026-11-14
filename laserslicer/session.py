@@ -207,6 +207,11 @@ class Session:
                      + f" ({len(r.parts)} no total)")
         if r.plates is not None:
             lines.append(f"Superfície coberta: {100 * r.plates.coverage:.0f}%")
+            n_sharp = len(r.plates.sharp_edges)
+            if n_sharp:
+                lines.append(f"Arredondamentos removidos: {n_sharp} (viraram cantos vivos)")
+            n_fing = sum(1 for j in r.plates.joints if j.kind.startswith("finger"))
+            lines.append(f"Juntas com dedos: {n_fing} (use Explodir para ver)")
             if r.plates.ribs is None:
                 lines.append(f"Nervuras: não ({r.plates.ribs_reason})")
             else:

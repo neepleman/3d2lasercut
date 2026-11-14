@@ -3,7 +3,7 @@
 Copyright (C) 2026 Neepleman
 Licenciado sob a GNU LGPL v2.1 ou posterior (veja LICENSE).
 """
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from .config import SliceConfig  # noqa: F401
 from .pipeline import run, run_file  # noqa: F401

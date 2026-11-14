@@ -138,6 +138,13 @@ def _plates_sections(cfg: SliceConfig, result) -> list[str]:
         lines.append(f"Placas com abas aparentes: {', '.join(sorted(tabbed, key=_natural_key))}. "
                      "Para esconder as abas numa face de vitrine, use `--no-tabs P1,...` "
                      "(as nervuras passam a só encostar nela e precisam de cola).")
+    if pi.sharp_edges:
+        radii = [e.radius for e in pi.sharp_edges]
+        lines += ["", "## Arredondamentos removidos",
+                  f"{len(pi.sharp_edges)} arredondamentos/chanfros (raio de "
+                  f"~{min(radii):.1f} a ~{max(radii):.1f} mm) viraram cantos vivos: as placas "
+                  "foram estendidas até a aresta e unidas por dedos. Para manter uma curva, "
+                  "baixe `--max-fillet` abaixo do raio dela."]
     if pi.skins:
         lines += ["", "## Chapas flexíveis (kerf bending)"]
         for sk in pi.skins:

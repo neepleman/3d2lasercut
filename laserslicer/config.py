@@ -26,6 +26,7 @@ class SliceConfig:
     plate_min_area: float = 400.0   # faces planas menores que isso não viram placa (mm²)
     plate_min_width: float = 12.0   # nem as mais estreitas que isso (mm)
     finger_width: float = 0.0       # largura dos dedos (mm); 0 = automático (3 x espessura)
+    max_fillet_radius: float = 10.0  # remove arredondamentos/chanfros até esse raio (mm); 0 = não
     ribs: str = "auto"              # nervuras internas: "auto", "none" ou "on"
     rib_spacing: float = 0.0        # distância entre nervuras (mm); 0 = automático
     tab_length: float = 0.0         # comprimento das abas nervura->placa (mm); 0 = automático

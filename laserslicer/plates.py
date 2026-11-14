@@ -68,6 +68,13 @@ def dir_to_local(M: np.ndarray, d) -> np.ndarray:
     return M[:3, :3] @ np.asarray(d, dtype=float)
 
 
+def clean_geom(g: BaseGeometry) -> BaseGeometry:
+    """Válida e sem vértices repetidos (segmentos de comprimento zero quebram a
+    extrusão 3D e geram cortes duplicados na laser)."""
+    import shapely
+    return shapely.remove_repeated_points(make_valid(g), 1e-6)
+
+
 # ------------------------------------------------------------------ estruturas
 
 @dataclass
@@ -303,7 +310,7 @@ def apply_joints(plates: list[Plate], joints: list[Joint],
             shape = unary_union([shape, *adds[P.id]])
         if cuts[P.id]:
             shape = shape.difference(unary_union(cuts[P.id]))
-        P.shape = make_valid(shape)
+        P.shape = clean_geom(shape)
     return warnings
 
 
@@ -311,7 +318,7 @@ def apply_joints(plates: list[Plate], joints: list[Joint],
 
 def plate_solid(P: Plate, cfg: SliceConfig, shape: BaseGeometry | None = None):
     """Sólido 3D da placa (para seções e prévia)."""
-    shape = P.shape if shape is None else shape
+    shape = clean_geom(P.shape if shape is None else shape)
     meshes = []
     for poly in polygons(shape):
         m = trimesh.creation.extrude_polygon(poly, cfg.thickness)  # w de 0 a t

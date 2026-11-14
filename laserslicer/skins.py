@@ -218,10 +218,10 @@ def find_skins(mesh: trimesh.Trimesh, face_region: np.ndarray, plates: list[Plat
     t, cl = cfg.thickness, cfg.slot_clearance
     warnings: list[str] = []
     covered = np.zeros(len(mesh.faces), dtype=bool)
-    free = np.nonzero(face_region < 0)[0]
+    free = np.nonzero(face_region == -1)[0]
     if len(free) == 0:
         return [], covered, warnings
-    is_free = face_region < 0
+    is_free = face_region == -1
     adj = mesh.face_adjacency
     edges = adj[is_free[adj[:, 0]] & is_free[adj[:, 1]]]
     comps = trimesh.graph.connected_components(edges, nodes=free, min_len=1)
